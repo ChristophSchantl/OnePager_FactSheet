@@ -246,7 +246,7 @@ if ticker:
         earnings = nic_ttm
         mc = mktcap
         if pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0:
-            figd, axd = plt.subplots(figsize=(1.8, 0.6))  # klein
+            figd, axd = plt.subplots(figsize=(2.8, 1.6))  # klein
             sizes = [earnings, max(mc - earnings, 0.0)]
             axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.22))
             axd.set_aspect("equal")
