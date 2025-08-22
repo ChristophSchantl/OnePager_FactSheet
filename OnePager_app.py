@@ -118,7 +118,7 @@ with right:
     reload_btn = st.button("Neu laden")
 
 with left:
-    st.title("SHI Management – STOCK PROFILE: BMPS One‑Pager")
+    st.title("SHI Management – STOCK PROFILE: One‑Pager")
     st.caption("Quick Check")
 
 # ----------------------------------
