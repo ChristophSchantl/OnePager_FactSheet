@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Banca Monte dei Paschi di Siena (BMPS) – One-Pager (Streamlit)
-Datenquelle: Yahoo Finance via yfinance
+
 
 Korrekturen & Add-ons:
 - Feld "Founded" entfernt
@@ -24,7 +24,7 @@ import yfinance as yf
 import streamlit as st
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="BMPS – One-Pager (Yahoo Finance)", layout="wide")
+st.set_page_config(page_title="BMPS – One-Pager", layout="wide")
 
 # ----------------------------------
 # Helpers
@@ -110,7 +110,7 @@ def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
 left, right = st.columns([2, 1])
 with right:
     st.header("⚙️ Parameter")
-    ticker = st.text_input("Ticker (Yahoo)", value="BMPS.MI").strip()
+    ticker = st.text_input("Ticker ", value="BMPS.MI").strip()
     currency_hint = st.text_input("Währungssymbol (Anzeige)", value="€")
     peers_default = "FBK.MI, MB.MI, BPE.MI, BAMI.MI"
     peers_text = st.text_input("Peer‑Ticker (kommagetrennt)", value=peers_default)
@@ -119,7 +119,7 @@ with right:
 
 with left:
     st.title("SHI Management – STOCK PROFILE: BMPS One‑Pager")
-    st.caption("Daten: Yahoo Finance (yfinance)")
+    st.caption("Quick Check")
 
 # ----------------------------------
 # Load core data
@@ -317,7 +317,7 @@ if ticker:
         if holders_df is not None:
             st.dataframe(holders_df.head(10), use_container_width=True)
         else:
-            st.caption("Hinweis: Yahoo liefert für viele EU‑Titel keine Holder‑Daten.")
+            st.caption("")
 
     with own2:
         st.subheader("Eigentümer‑Kreise (Skizze)")
@@ -358,4 +358,4 @@ if ticker:
     st.download_button("CSV – Meta exportieren", data=meta_table.to_csv(index=False).encode("utf-8"), file_name=f"{ticker}_meta.csv", mime="text/csv")
 
 else:
-    st.info("Bitte einen gültigen Yahoo‑Ticker eingeben (z. B. BMPS.MI).")
+    st.info("Ticker (z. B. BMPS.MI).")
