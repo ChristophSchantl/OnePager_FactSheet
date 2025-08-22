@@ -1,58 +1,40 @@
-# onepager_app.py
+# app.py
 from __future__ import annotations
-
 import math
 from typing import Dict, List, Tuple
 
+import requests
 import numpy as np
 import pandas as pd
-import requests
 import yfinance as yf
 import streamlit as st
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-# ---------- Streamlit page ----------
-st.set_page_config(page_title="One-Pager", layout="wide")
-
-# ---------- Global typography & figure style ----------
-mpl.rcParams.update({
-    "font.size": 9,
-    "axes.titlesize": 9,
-    "axes.labelsize": 8,
-    "xtick.labelsize": 7,
-    "ytick.labelsize": 7,
-    "legend.fontsize": 8,
-    "figure.dpi": 120,
-})
+# ──────────────────────────────────────────────────────────────────────────────
+# Seite & Stil
+# ──────────────────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="SHI – STOCK CHECK", layout="wide")
 
 st.markdown(
     """
     <style>
-    .block-container {padding-top:1.2rem; padding-bottom:0.6rem;}
-    .page-title {font-size:1.8rem; font-weight:800; margin:0.75rem 0 0.4rem 0; line-height:1.15;}
-
-    /* kompakte KPI-Komponente */
-    .kpi-wrap {margin:0.1rem 0;}
-    .kpi-label {font-size:0.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
-    .kpi-value {font-size:1.38rem; font-weight:700; color:#111;}
-    .kpi-green {color:#16a34a !important;}
+      .block-container {padding-top:1.1rem; padding-bottom:0.6rem;}
+      .page-title {font-size:1.8rem; font-weight:800; margin:0 0 .6rem 0;}
+      .kpi-wrap {margin:0.15rem 0;}
+      .kpi-label {font-size:.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
+      .kpi-value {font-size:1.38rem; font-weight:700; color:#111;}
+      .kpi-green {color:#16a34a !important;}
+      .smallnote {color:#666; font-size:.8rem;}
+      [data-testid="stMetricValue"] {font-size:1.2rem;}
+      [data-testid="stMetricLabel"] {font-size:.75rem; color:#666;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ---------- Session defaults ----------
-if "ticker" not in st.session_state:
-    st.session_state.ticker = "BMPS.MI"
-if "years_window" not in st.session_state:
-    st.session_state.years_window = 3
-if "search_results" not in st.session_state:
-    st.session_state.search_results: List[Dict] = []
-if "search_query" not in st.session_state:
-    st.session_state.search_query = ""
-
-# ---------- Helpers ----------
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
 def safe_get(d: Dict, key: str, default=np.nan):
     try:
         v = d.get(key, default)
@@ -68,13 +50,10 @@ def bn(x: float) -> float:
     return float(x) / 1e9 if pd.notna(x) else np.nan
 
 def normalize_percent_robust(x: float) -> float:
-    if pd.isna(x):
-        return np.nan
-    try:
-        y = float(x)
-    except Exception:
-        return np.nan
-    while y > 1.0:
+    if pd.isna(x): return np.nan
+    try: y = float(x)
+    except Exception: return np.nan
+    while y > 1.0:  # 10.5 -> 0.105
         y /= 100.0
     return np.nan if y < 0 else y
 
@@ -85,30 +64,17 @@ def first_notna(*vals):
     return np.nan
 
 def get_income_value(df: pd.DataFrame, candidates: List[str]) -> float:
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        return np.nan
-    idx_map = {i.lower(): i for i in df.index}
+    if not isinstance(df, pd.DataFrame) or df.empty: return np.nan
+    idx_map = {str(i).lower(): i for i in df.index}
     for c in candidates:
         key = c.lower()
         if key in idx_map:
             ser = df.loc[idx_map[key]]
-            try:
-                return float(ser.dropna().iloc[0])
-            except Exception:
-                continue
+            try: return float(ser.dropna().iloc[0])
+            except Exception: continue
     return np.nan
 
-def load_ticker_info(ticker: str) -> Dict:
-    t = yf.Ticker(ticker)
-    try:
-        info = t.info or {}
-    except Exception:
-        info = {}
-    fast = getattr(t, "fast_info", {}) or {}
-    return {"ticker": t, "info": info, "fast": fast}
-
 def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
-    """Yield (0..1): info -> rate/price -> TTM fallback; clamp absurd values."""
     y0 = normalize_percent_robust(safe_get(info, "dividendYield", np.nan))
     y1 = normalize_percent_robust(safe_get(info, "trailingAnnualDividendYield", np.nan))
     rate = safe_get(info, "trailingAnnualDividendRate", np.nan)
@@ -122,28 +88,13 @@ def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
             if isinstance(div, pd.Series) and not div.empty:
                 last_date = div.index.max()
                 ttm = div[div.index >= last_date - pd.DateOffset(years=1)].sum()
-                if ttm > 0:
-                    y = float(ttm / price)
+                if ttm > 0: y = float(ttm / price)
         except Exception:
             pass
-    if pd.notna(y) and y > 0.5:
+    if pd.notna(y) and y > 0.5:  # unrealistisch hoch -> ignoriere
         return np.nan
     return y
 
-def fmt_pct(x: float) -> str:
-    return "n/a" if pd.isna(x) else f"{x*100:.2f}%"
-
-def fmt_money_bn(x: float, code: str) -> str:
-    sym = currency_symbol(code)
-    return "n/a" if pd.isna(x) else f"{sym}{bn(x):.2f}b ({code})"
-
-def style_axes(ax):
-    ax.grid(True, linestyle=":", alpha=0.22)
-    for spine in ax.spines.values():
-        spine.set_alpha(0.22)
-    ax.tick_params(labelsize=7)
-
-# kleine KPI-Hilfsfunktion mit Grün-Highlight
 def kpi(col, label: str, value_str: str, highlight: bool = False):
     klass = "kpi-value kpi-green" if highlight else "kpi-value"
     col.markdown(
@@ -152,19 +103,15 @@ def kpi(col, label: str, value_str: str, highlight: bool = False):
         unsafe_allow_html=True,
     )
 
-# ---------- Yahoo symbol search ----------
+# ── Yahoo Symbol Suche (robust, mit Fallback) ─────────────────────────────────
 def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
-    """Yahoo-Suche mit UA-Header + Fallback-Endpoint."""
     if not query:
         return []
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0 Safari/537.36"
-        )
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/124.0 Safari/537.36")
     }
-
     # 1) Haupt-Endpoint
     try:
         url = "https://query2.finance.yahoo.com/v1/finance/search"
@@ -174,7 +121,7 @@ def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
         quotes = (r.json() or {}).get("quotes", []) or []
         out = []
         for q in quotes:
-            sym  = q.get("symbol")
+            sym = q.get("symbol")
             name = q.get("shortname") or q.get("longname") or q.get("name") or ""
             exch = q.get("exchDisp") or q.get("exchange") or ""
             if sym and name:
@@ -183,8 +130,7 @@ def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
             return out[:limit]
     except Exception:
         pass
-
-    # 2) Fallback-Endpoint (autoc)
+    # 2) Fallback
     try:
         url = "https://autoc.finance.yahoo.com/autoc"
         params = {"query": query, "region": 1, "lang": "en"}
@@ -193,75 +139,65 @@ def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
         results = ((r.json() or {}).get("ResultSet", {}) or {}).get("Result", []) or []
         out = []
         for e in results:
-            sym  = e.get("symbol")
+            sym = e.get("symbol")
             name = e.get("name")
             exch = e.get("exchDisp") or e.get("exch") or ""
             if sym and name:
                 out.append({"symbol": sym, "name": name, "exchange": exch})
         return out[:limit]
     except Exception:
-        pass
+        return []
 
-    return []
+# ──────────────────────────────────────────────────────────────────────────────
+# Session defaults
+# ──────────────────────────────────────────────────────────────────────────────
+if "ticker" not in st.session_state:
+    st.session_state.ticker = "BMPS.MI"   # zentrale Quelle der Wahrheit
+if "search_results" not in st.session_state:
+    st.session_state.search_results = []
+if "search_query" not in st.session_state:
+    st.session_state.search_query = ""
 
-
-# ---------- Layout: zwei Spalten ----------
+# ──────────────────────────────────────────────────────────────────────────────
+# Layout: Suche links, Parameter rechts
+# ──────────────────────────────────────────────────────────────────────────────
 left, right = st.columns([2, 1])
 
-# --- RIGHT: Parameter (Ticker + Slider) ---
-with right:
-    st.markdown("<div class='page-title'>Parameters</div>", unsafe_allow_html=True)
-    # text_input mit eigenem key, gekoppelt an session_state
-    ticker_input = st.text_input("Ticker", key="ticker_input", value=st.session_state.ticker)
-    if ticker_input and ticker_input != st.session_state.ticker:
-        st.session_state.ticker = ticker_input.strip()
-
-    years_window = st.slider(
-        "Price window (years)", min_value=1, max_value=10,
-        value=st.session_state.years_window, step=1, key="years_window"
-    )
-
-# --- LEFT: Title + Suche ---
 with left:
-    st.markdown("<h1 class='page-title'>SHI - STOCK CHECK</h1>", unsafe_allow_html=True)
+    st.markdown("<div class='page-title'>SHI - STOCK CHECK</div>", unsafe_allow_html=True)
 
-    # Sucheingabe + Button
-    query = st.text_input("Search company or ticker", key="search_query", placeholder="e.g. Microsoft or MSFT")
+    # Suche (links)
+    st.text_input("Search company or ticker", key="search_query", placeholder="e.g. Microsoft or MSFT")
     if st.button("Search"):
-        st.session_state.search_results = yahoo_symbol_search(query)
+        st.session_state.search_results = yahoo_symbol_search(st.session_state.search_query)
 
-    # Ergebnisse anzeigen
     results = st.session_state.search_results
     if results:
-        # Tabelle als Überblick
-        st.dataframe(
-            pd.DataFrame(results)[["symbol", "name", "exchange"]],
-            use_container_width=True, hide_index=True
-        )
-
-        # Auswahl + Übernehmen
+        st.caption("Search results")
+        df_res = pd.DataFrame(results)
+        st.dataframe(df_res[["symbol", "name", "exchange"]], use_container_width=True, hide_index=True)
         labels = [f"{r['symbol']} — {r['name']} ({r['exchange']})" for r in results]
         pick = st.selectbox("Pick one", options=list(range(len(results))),
                             format_func=lambda i: labels[i], key="search_pick")
         if st.button("Use selection"):
             chosen = results[pick]
-            st.session_state.ticker = chosen["symbol"]
-            st.session_state.ticker_input = chosen["symbol"]  # spiegelt rechts ins Ticker-Feld
+            st.session_state.ticker = chosen["symbol"]   # einheitlicher Key
             st.success(f"Using {chosen['symbol']}")
-    else:
-        # Nur wenn ein Suchversuch stattgefunden hat und nichts kam, Hinweis zeigen
-        if st.session_state.get("search_query"):
-            st.info("No results yet. Try a different term (or check network/headers).")
+            st.rerun()
 
+with right:
+    st.header("Parameters")
+    st.text_input("Ticker", key="ticker")     # gleiches State-Objekt
+    years_window = st.slider("Price window (years)", 1, 10, 3, 1)
 
-# ---------- Core ----------
+# ──────────────────────────────────────────────────────────────────────────────
+# Core – Daten laden & anzeigen
+# ──────────────────────────────────────────────────────────────────────────────
 ticker = st.session_state.ticker
 
-if ticker:
-    data = load_ticker_info(ticker)
-    tkr: yf.Ticker = data["ticker"]
-    info: Dict = data["info"]
-    fast: Dict = data["fast"]
+try:
+    tkr = yf.Ticker(ticker)
+    info: Dict = tkr.info or {}
 
     # Basics
     long_name = safe_get(info, "longName", ticker)
@@ -271,41 +207,26 @@ if ticker:
     country = safe_get(info, "country", "")
     employees = safe_get(info, "fullTimeEmployees", np.nan)
     exch = first_notna(safe_get(info, "fullExchangeName", None), safe_get(info, "exchange", None), "")
-    mktcap = first_notna(safe_get(info, "marketCap", None), safe_get(fast, "market_cap", None))
-    shares = first_notna(safe_get(info, "sharesOutstanding", None), safe_get(fast, "shares_outstanding", None))
-    price = first_notna(safe_get(info, "currentPrice", None), safe_get(fast, "last_price", None))
+    mktcap = first_notna(safe_get(info, "marketCap", None), safe_get(getattr(tkr,"fast_info",{}) or {}, "market_cap", None))
+    shares = first_notna(safe_get(info, "sharesOutstanding", None), safe_get(getattr(tkr,"fast_info",{}) or {}, "shares_outstanding", None))
+    price = first_notna(safe_get(info, "currentPrice", None), safe_get(getattr(tkr,"fast_info",{}) or {}, "last_price", None))
     currency = safe_get(info, "currency", "EUR")
-    symb = currency_symbol(currency)
-    label_tkr = str(safe_get(info, "symbol", ticker)).upper()
+    sym = currency_symbol(currency)
+    label_tkr = (safe_get(info, "symbol", None) or ticker).upper()
 
-    # KPIs (raw)
+    # KPIs
     trailing_pe = safe_get(info, "trailingPE", np.nan)
     ps_ttm = safe_get(info, "priceToSalesTrailing12Months", np.nan)
     pb = first_notna(safe_get(info, "priceToBook", None), np.nan)
 
-    # Dividend
+    # Dividende
     dividend_yield = compute_dividend_yield(tkr, price, info)
     payout_ratio = normalize_percent_robust(safe_get(info, "payoutRatio", np.nan))
 
-    # Earnings date
-    ed = safe_get(info, "earningsDate", [])
-    next_earnings = None
-    if isinstance(ed, (list, tuple)) and len(ed) > 0:
-        try:
-            next_earnings = pd.to_datetime(ed[0]).date().isoformat()
-        except Exception:
-            next_earnings = None
-
     # Financials
-    try:
-        fin_a = tkr.financials
-    except Exception:
-        fin_a = pd.DataFrame()
-    try:
-        fin_q = tkr.quarterly_financials
-    except Exception:
-        fin_q = pd.DataFrame()
-    fin = fin_a if isinstance(fin_a, pd.DataFrame) and not fin_a.empty else fin_q
+    fin_a = tkr.financials if isinstance(getattr(tkr, "financials", None), pd.DataFrame) else pd.DataFrame()
+    fin_q = tkr.quarterly_financials if isinstance(getattr(tkr, "quarterly_financials", None), pd.DataFrame) else pd.DataFrame()
+    fin = fin_a if not fin_a.empty else fin_q
 
     revenue      = get_income_value(fin, ["Total Revenue", "Revenue"])
     cost_rev     = get_income_value(fin, ["Cost Of Revenue", "Cost of Revenue", "Cost of revenue"])
@@ -315,97 +236,97 @@ if ticker:
 
     if pd.isna(gross_profit) and pd.notna(revenue) and pd.notna(cost_rev):
         gross_profit = revenue - cost_rev
-    other_expenses = max(0.0, op_ex - cost_rev) if (pd.notna(op_ex) and pd.notna(cost_rev)) else op_ex
 
-    # ---------- Header & Meta ----------
-    meta_col1, meta_col2, meta_col3 = st.columns([1.4, 1.1, 1.2])
+    # Header / Meta
+    st.markdown("---")
+    meta_col1, meta_col2, meta_col3 = st.columns(3)
     with meta_col1:
         st.subheader(long_name)
-        st.markdown(f"**Ticker:** {label_tkr}  ")
-        st.markdown(f"**Exchange:** {exch}  ")
-        st.markdown(f"**Country:** {country}  ")
-        st.markdown(f"**Web:** [{website}]({website})")
+        st.write("**Ticker:**", label_tkr)
+        st.write("**Exchange:**", exch)
+        st.write("**Country:**", country)
+        if website:
+            st.write("**Web:**", website)
     with meta_col2:
-        st.markdown(f"**Industry:** {industry}")
-        st.markdown(f"**Sector:** {sector}")
-        st.markdown(f"**Employees:** {int(employees) if pd.notna(employees) else 'n/a'}")
-        st.markdown(f"**Shares Outstanding (bn):** {bn(shares):.3f}")
+        st.write("**Industry:**", industry or "n/a")
+        st.write("**Sector:**", sector or "n/a")
+        st.write("**Employees:**", int(employees) if pd.notna(employees) else "n/a")
+        st.write("**Shares Outstanding (bn):**", f"{bn(shares):.3f}" if pd.notna(shares) else "n/a")
     with meta_col3:
-        st.markdown(f"**Market Cap (bn):** {bn(mktcap):.2f} {currency}")
-        st.markdown(f"**Current Price:** {price if pd.notna(price) else 'n/a'} {currency}")
-        st.markdown(f"**Next earnings:** {next_earnings or 'n/a'}")
+        st.write("**Market Cap (bn):**", f"{bn(mktcap):.2f} {currency}" if pd.notna(mktcap) else "n/a")
+        st.write("**Current Price:**", f"{price:.3f} {currency}" if pd.notna(price) else "n/a")
+        ed = safe_get(info, "earningsDate", [])
+        next_earnings = None
+        if isinstance(ed, (list, tuple)) and ed:
+            try: next_earnings = pd.to_datetime(ed[0]).date().isoformat()
+            except Exception: pass
+        st.write("**Next earnings:**", next_earnings or "n/a")
 
     if safe_get(info, "longBusinessSummary", ""):
         st.caption(safe_get(info, "longBusinessSummary", ""))
 
+    # KPI-Zeile mit Grüner Regel
     st.markdown("---")
-
-    # ---------- KPI Block mit Grün-Logik ----------
     k1, k2, k3, k4, k5 = st.columns(5)
-    pe_ok = pd.notna(trailing_pe) and trailing_pe < 10
-    pb_ok = pd.notna(pb) and pb < 1
-    dy_ok = pd.notna(dividend_yield) and dividend_yield > 0.05
+    pe_ok  = pd.notna(trailing_pe) and trailing_pe < 10
+    pb_ok  = pd.notna(pb)          and pb < 1
+    dy_ok  = pd.notna(dividend_yield) and dividend_yield > 0.05
 
     kpi(k1, "P/E RATIO", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a", pe_ok)
     kpi(k2, "P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a", False)
     kpi(k3, "P/B", f"{pb:.2f}" if pd.notna(pb) else "n/a", pb_ok)
-    kpi(k4, "DIVIDEND YIELD", fmt_pct(dividend_yield), dy_ok)
-    kpi(k5, "PAYOUT RATIO", fmt_pct(payout_ratio), False)
+    kpi(k4, "DIVIDEND YIELD", "n/a" if pd.isna(dividend_yield) else f"{dividend_yield*100:.2f}%", dy_ok)
+    kpi(k5, "PAYOUT RATIO", "n/a" if pd.isna(payout_ratio) else f"{payout_ratio*100:.2f}%", False)
 
+    # Zwei kleine Charts nebeneinander
     st.markdown("---")
-
-    # ---------- Two charts side by side ----------
     ch_left, ch_right = st.columns(2)
 
-    # Price chart
     with ch_left:
         st.caption("Price (Close)")
         try:
-            hist = yf.download(ticker, period=f"{st.session_state.years_window}y", interval="1d", progress=False)
+            hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
             if isinstance(hist, pd.DataFrame) and not hist.empty:
                 series = hist["Close"].dropna()
-                figp, axp = plt.subplots(figsize=(4.6, 2.0))
+                figp, axp = plt.subplots(figsize=(4.8, 2.0))
                 axp.plot(series.index, series.values, linewidth=0.7)
-                axp.set_title(f"{label_tkr} – {st.session_state.years_window}y", fontsize=9)
+                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=9)
                 axp.set_xlabel("Date", fontsize=6)
                 axp.set_ylabel(f"Price ({currency})", fontsize=6)
+                axp.grid(True, linestyle=":", alpha=0.22)
                 axp.tick_params(axis="both", labelsize=6)
-                style_axes(axp)
                 st.pyplot(figp, clear_figure=True)
             else:
                 st.info("No price history available.")
         except Exception as e:
             st.warning(f"Could not load price data: {e}")
 
-    # Income bars (ohne Other Expenses)
     with ch_right:
         st.caption("Earnings & Revenue (last period)")
-        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]
+        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]  # ohne Other Expenses
         gross_val = gross_profit if pd.notna(gross_profit) else (
             revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan
         )
         vals_abs = [bn(revenue), bn(cost_rev), bn(gross_val), bn(net_income)]
         colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#17becf"]
 
-        fig, ax = plt.subplots(figsize=(4.6, 2.0))
+        fig, ax = plt.subplots(figsize=(4.8, 2.0))
         x = np.arange(len(names))
         bars = ax.bar(x, vals_abs, color=colors, width=0.8)
-        ax.set_ylabel(f"{symb} bn ({currency})", fontsize=7)
+        ax.set_ylabel(f"{sym} bn ({currency})", fontsize=7)
         ax.set_title(f"{label_tkr} – {currency}", fontsize=7)
         ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=10)
-        style_axes(ax)
+        ax.set_xticklabels(names, rotation=10, fontsize=7)
+        ax.grid(True, linestyle=":", alpha=0.22, axis="y")
         for rect, v in zip(bars, vals_abs):
             if pd.notna(v):
                 ax.text(rect.get_x() + rect.get_width()/2, rect.get_height(),
-                        f"{symb}{v:.2f}b", ha="center", va="bottom", fontsize=5.0)
+                        f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=6)
         st.pyplot(fig, clear_figure=True)
 
+    # Valuation & Profitability (mit Regeln)
     st.markdown("---")
-
-    # ---------- Valuation & Profitability ----------
     st.subheader("Valuation & Profitability")
-
     ev         = safe_get(info, "enterpriseValue", np.nan)
     peg        = safe_get(info, "pegRatio", np.nan)
     ev_rev     = first_notna(safe_get(info, "enterpriseToRevenue", None),
@@ -414,10 +335,11 @@ if ticker:
     profit_m   = safe_get(info, "profitMargins", np.nan)
     roa        = safe_get(info, "returnOnAssets", np.nan)
     roe        = safe_get(info, "returnOnEquity", np.nan)
-    revenue_ttm = safe_get(info, "totalRevenue", np.nan)
-    nic_ttm     = safe_get(info, "netIncomeToCommon", np.nan)
+    revenue_ttm= safe_get(info, "totalRevenue", np.nan)
+    nic_ttm    = safe_get(info, "netIncomeToCommon", np.nan)
 
     GREEN = 'color: #16a34a; font-weight:700;'
+
     def style_val_rows(row):
         m = row["Metric"]
         if m == "EV/EBITDA" and pd.notna(ev_ebitda) and ev_ebitda < 10:
@@ -427,33 +349,30 @@ if ticker:
         return ["", ""]
 
     val_rows: List[Tuple[str, str]] = [
-        ("Enterprise Value",            fmt_money_bn(ev,        currency)),
+        ("Enterprise Value",            "n/a" if pd.isna(ev)          else f"{currency_symbol(currency)}{bn(ev):.2f}b ({currency})"),
         ("Trailing P/E",                "n/a" if pd.isna(trailing_pe) else f"{trailing_pe:.2f}×"),
-        ("Forward P/E",                 "n/a" if pd.isna(peg) else f"{safe_get(info, 'forwardPE', np.nan):.2f}×"),
         ("EV/Revenue",                  "n/a" if pd.isna(ev_rev)      else f"{ev_rev:.2f}×"),
         ("EV/EBITDA",                   "n/a" if pd.isna(ev_ebitda)   else f"{ev_ebitda:.2f}×"),
-        ("Profit Margin",               fmt_pct(profit_m)),
-        ("ROA (ttm)",                   fmt_pct(roa)),
-        ("ROE (ttm)",                   fmt_pct(roe)),
-        ("Revenue (ttm)",               fmt_money_bn(revenue_ttm, currency)),
-        ("Net Income to Common (ttm)",  fmt_money_bn(nic_ttm,     currency)),
+        ("Profit Margin",               "n/a" if pd.isna(profit_m)    else f"{profit_m*100:.2f}%"),
+        ("ROA (ttm)",                   "n/a" if pd.isna(roa)         else f"{roa*100:.2f}%"),
+        ("ROE (ttm)",                   "n/a" if pd.isna(roe)         else f"{roe*100:.2f}%"),
+        ("Revenue (ttm)",               "n/a" if pd.isna(revenue_ttm) else f"{currency_symbol(currency)}{bn(revenue_ttm):.2f}b ({currency})"),
+        ("Net Income to Common (ttm)",  "n/a" if pd.isna(nic_ttm)     else f"{currency_symbol(currency)}{bn(nic_ttm):.2f}b ({currency})"),
     ]
     val_df = pd.DataFrame(val_rows, columns=["Metric", "Value"])
     st.table(val_df.style.apply(style_val_rows, axis=1))
 
+    # Balance Sheet & Cash Flow (mit Regel)
     st.markdown("---")
-
-    # ---------- Balance Sheet & Cash Flow ----------
     st.subheader("Balance Sheet & Cash Flow")
-
     total_cash = safe_get(info, "totalCash", np.nan)     # mrq
-    d_to_e     = safe_get(info, "debtToEquity", np.nan)  # mrq (Yahoo liefert oft %)
+    d_to_e     = safe_get(info, "debtToEquity", np.nan)  # mrq (meist %)
     lfcf       = safe_get(info, "leveredFreeCashflow", np.nan)
 
     def style_bs_rows(row):
         if row["Metric"] == "Total Debt/Equity (mrq)" and pd.notna(d_to_e):
             val = float(d_to_e)
-            cond = (val < 50) if val > 1 else (val < 0.50)
+            cond = (val < 50) if val > 1 else (val < 0.50)  # Prozent vs. Faktor
             if cond: return [GREEN, GREEN]
         return ["", ""]
 
@@ -463,14 +382,12 @@ if ticker:
         d_to_e_disp = "n/a"
 
     bs_rows: List[Tuple[str, str]] = [
-        ("Total Cash (mrq)",            fmt_money_bn(total_cash, currency)),
+        ("Total Cash (mrq)",            "n/a" if pd.isna(total_cash) else f"{currency_symbol(currency)}{bn(total_cash):.2f}b ({currency})"),
         ("Total Debt/Equity (mrq)",     d_to_e_disp),
-        ("Levered Free Cash Flow",      fmt_money_bn(lfcf, currency)),
+        ("Levered Free Cash Flow",      "n/a" if pd.isna(lfcf)       else f"{currency_symbol(currency)}{bn(lfcf):.2f}b ({currency})"),
     ]
     bs_df = pd.DataFrame(bs_rows, columns=["Metric", "Value"])
     st.table(bs_df.style.apply(style_bs_rows, axis=1))
 
-    st.markdown("---")
-
-else:
-    st.info("Enter a Yahoo ticker, e.g., BMPS.MI.")
+except Exception as e:
+    st.error(f"Could not load data for '{ticker}': {e}")
