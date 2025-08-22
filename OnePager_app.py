@@ -1,16 +1,13 @@
 
 """
 Korrekturen & Add-ons (aktuell):
-- Charts kleiner & dezenter (kompakt, feine Gitterlinien, enges Layout)
+- Charts **kleiner & dezenter** und **zwei pro Zeile** (Preis links, Income rechts)
 - Peer-Vergleich & Eigentümer entfernt
-- Aktuelles P/E (trailing) im KPI-Block; Forward P/E in den **Valuation Measures** (auf Wunsch)
+- Aktuelles P/E (trailing) im KPI-Block; Forward P/E in den Valuation Measures
 - Dividend Yield robust normalisiert + TTM-Fallback
-- Preis-Chart: Zeitraum via Jahre **oder** Start/End-Datum (kleines Format)
+- Preis-Chart: Zeitraum via Jahre **oder** Start/End-Datum (kompaktes Format)
 - Income-Grafik mit **korrekter Währung** (Symbol + Code)
-- **Neue Kennzahlen** integriert:
-  Valuation Measures: EV, Trailing P/E, Forward P/E, PEG (5y exp), EV/Revenue, EV/EBITDA,
-  Profitability: Profit Margin, ROA (ttm), ROE (ttm), Revenue (ttm), Net Income to Common (ttm),
-  Balance Sheet & CF: Total Cash (mrq), Debt/Equity (mrq), Levered Free Cash Flow.
+- Zusätzliche Kennzahlen (EV, PEG, EV/Revenue, EV/EBITDA, Profit Margin, ROA/ROE, Revenue/Net Income ttm, Total Cash, Debt/Equity, LFCF)
 
 Start:
     pip install streamlit yfinance pandas numpy matplotlib
@@ -50,9 +47,7 @@ def mm(x: float) -> float:
 
 
 def normalize_percent_robust(x: float) -> float:
-    """Normalisiert Prozent/Fraction zuverlässig auf Fraktion (0..1).
-    Korrigiert Werte wie 10.58 oder 1058 iterativ durch /100.
-    """
+    """Normalisiert Prozent/Fraction zuverlässig auf Fraktion (0..1)."""
     if pd.isna(x):
         return np.nan
     try:
@@ -175,8 +170,8 @@ if ticker:
     ps_ttm = safe_get(info, "priceToSalesTrailing12Months", np.nan)
     pb = first_notna(safe_get(info, "priceToBook", None), np.nan)
 
-    # Dividende – korrigiert
-    dividend_yield = compute_dividend_yield(tkr, price, info)  # Fraktion 0..1
+    # Dividende
+    dividend_yield = compute_dividend_yield(tkr, price, info)
     payout_ratio = normalize_percent_robust(safe_get(info, "payoutRatio", np.nan))
 
     # Earnings
@@ -249,54 +244,53 @@ if ticker:
     st.markdown("---")
 
     # ----------------------------------
-    # Price Chart – klein & dezent
+    # ZWEI CHARTS NEBENEINANDER (klein & dezent)
     # ----------------------------------
-    st.subheader("Preisverlauf (Close)")
-    try:
-        if period_mode == "Start/End Datum":
-            hist = yf.download(ticker, start=pd.to_datetime(start_date), end=pd.to_datetime(end_date) + pd.Timedelta(days=1), interval="1d", progress=False)
-        else:
-            hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
-        if isinstance(hist, pd.DataFrame) and not hist.empty:
-            series = hist["Close"].dropna()
-            figp, axp = plt.subplots(figsize=(6, 2.6))
-            axp.plot(series.index, series.values, linewidth=1.0)
-            title_range = f"{years_window}J" if period_mode != "Start/End Datum" else f"{pd.to_datetime(start_date).date()} → {pd.to_datetime(end_date).date()}"
-            axp.set_title(f"{ticker} – {title_range} Close", fontsize=11)
-            axp.set_xlabel("Datum", fontsize=9)
-            axp.set_ylabel(f"Preis ({currency})", fontsize=9)
-            axp.grid(True, linestyle=":", alpha=0.3)
-            axp.tick_params(labelsize=8)
-            for spine in axp.spines.values():
-                spine.set_alpha(0.3)
-            st.pyplot(figp, clear_figure=True)
-        else:
-            st.info("Kein Kursverlauf verfügbar.")
-    except Exception as e:
-        st.warning(f"Kursdaten konnten nicht geladen werden: {e}")
+    ch_left, ch_right = st.columns(2)
 
-    st.markdown("---")
+    with ch_left:
+        st.caption("Preisverlauf (Close)")
+        try:
+            if period_mode == "Start/End Datum":
+                hist = yf.download(ticker, start=pd.to_datetime(start_date), end=pd.to_datetime(end_date) + pd.Timedelta(days=1), interval="1d", progress=False)
+            else:
+                hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
+            if isinstance(hist, pd.DataFrame) and not hist.empty:
+                series = hist["Close"].dropna()
+                figp, axp = plt.subplots(figsize=(5.0, 2.2))
+                axp.plot(series.index, series.values, linewidth=1.0)
+                title_range = f"{years_window}J" if period_mode != "Start/End Datum" else f"{pd.to_datetime(start_date).date()} → {pd.to_datetime(end_date).date()}"
+                axp.set_title(f"{ticker} – {title_range}", fontsize=10)
+                axp.set_xlabel("Datum", fontsize=8)
+                axp.set_ylabel(f"Preis ({currency})", fontsize=8)
+                axp.grid(True, linestyle=":", alpha=0.3)
+                axp.tick_params(labelsize=8)
+                for spine in axp.spines.values():
+                    spine.set_alpha(0.25)
+                st.pyplot(figp, clear_figure=True)
+            else:
+                st.info("Kein Kursverlauf verfügbar.")
+        except Exception as e:
+            st.warning(f"Kursdaten konnten nicht geladen werden: {e}")
 
-    # ----------------------------------
-    # Income Statement Bars – mit Währung
-    # ----------------------------------
-    st.subheader("Income (zuletzt verfügbar)")
-    names = ["Revenue", "Cost of Revenue", "Gross Profit", "Other Expenses", "Net Income"]
-    values = [bn(revenue), bn(cost_rev), bn(gross_profit), bn(other_expenses), bn(net_income)]
-    df_plot = pd.DataFrame({"Item": names, "Value": values})
-    fig, ax = plt.subplots(figsize=(5.8, 3.2))
-    ax.bar(df_plot["Item"], df_plot["Value"]) 
-    ax.set_ylabel(f"{currency_hint} bn ({currency})", fontsize=9)
-    ax.set_title(f"BMPS – Ergebnisblöcke (letzte Periode) – {currency}", fontsize=11)
-    for i, v in enumerate(values):
-        if pd.notna(v):
-            ax.text(i, v if v >= 0 else 0, f"{v:.2f}", ha='center', va='bottom', fontsize=8)
-    plt.xticks(rotation=12)
-    ax.grid(axis='y', linestyle=":", alpha=0.25)
-    ax.tick_params(labelsize=8)
-    for spine in ax.spines.values():
-        spine.set_alpha(0.3)
-    st.pyplot(fig, clear_figure=True)
+    with ch_right:
+        st.caption("Income (letzte Periode)")
+        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Other Expenses", "Net Income"]
+        values = [bn(revenue), bn(cost_rev), bn(gross_profit), bn(other_expenses), bn(net_income)]
+        df_plot = pd.DataFrame({"Item": names, "Value": values})
+        fig, ax = plt.subplots(figsize=(5.0, 2.2))
+        ax.bar(df_plot["Item"], df_plot["Value"]) 
+        ax.set_ylabel(f"{currency_hint} bn ({currency})", fontsize=8)
+        ax.set_title(f"BMPS – {currency}", fontsize=10)
+        for i, v in enumerate(values):
+            if pd.notna(v):
+                ax.text(i, max(v, 0), f"{v:.2f}", ha='center', va='bottom', fontsize=7)
+        plt.xticks(rotation=12)
+        ax.grid(axis='y', linestyle=":", alpha=0.25)
+        ax.tick_params(labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_alpha(0.25)
+        st.pyplot(fig, clear_figure=True)
 
     st.markdown("---")
 
@@ -340,13 +334,11 @@ if ticker:
     st.subheader("Balance Sheet & Cash Flow")
 
     total_cash = safe_get(info, "totalCash", np.nan)  # mrq
-    d_to_e = safe_get(info, "debtToEquity", np.nan)   # mrq (typisch in %/ratio)
+    d_to_e = safe_get(info, "debtToEquity", np.nan)   # mrq
     lfcf = safe_get(info, "leveredFreeCashflow", np.nan)
 
-    # Debt/Equity kann als Zahl (z.B. 120) geliefert werden – Prozent normalisieren? Wir zeigen als Ratio/Prozent verständlich an.
     d_to_e_disp = "n/a"
     if pd.notna(d_to_e):
-        # Heuristik: >5 → wahrscheinlich Prozentangabe (z.B. 120 -> 120%). Wir zeigen beides.
         if d_to_e > 5:
             d_to_e_disp = f"{d_to_e:.1f}% (~{d_to_e/100:.2f}×)"
         else:
