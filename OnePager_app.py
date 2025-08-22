@@ -235,7 +235,7 @@ if ticker:
     try:
         hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
         if isinstance(hist, pd.DataFrame) and not hist.empty:
-            series = hist["Adj Close"].dropna()
+            series = hist["Close"].dropna()
             figp, axp = plt.subplots(figsize=(10, 4))
             axp.plot(series.index, series.values)
             axp.set_title(f"{ticker} – {years_window}J Close")
