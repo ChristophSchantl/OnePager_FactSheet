@@ -1,16 +1,17 @@
-
+# bmps_onepager_streamlit.py
+# -*- coding: utf-8 -*-
 """
+Banca Monte dei Paschi di Siena (BMPS) – One-Pager (Streamlit)
+
 Updates:
-- Compact header; simplified layout
-- All UI labels in English
-- Removed manual currency symbol input; infer from Yahoo 'currency'
-- Removed custom start/end date inputs → only a years slider remains
-- Small, subtle charts; two charts per row (Price left, Income right)
-- Owner/Peers removed
-- KPI block uses Trailing P/E; Forward P/E only in Valuation Measures
+- Compact header; English UI
+- Removed custom dates → only years slider
+- Charts smaller & finer (global typography + subtle grid)
+- Two charts per row (Price left, Income right)
+- Income chart redesigned as **stylized bar (waterfall-like)** similar to reference
+- KPI block (Trailing P/E). Forward P/E only in Valuation Measures
 - Robust dividend yield (scale fixes + TTM fallback)
-- Income chart shows correct currency (symbol + code)
-- Added P/E donut (Market Cap vs Earnings) with big PE badge
+- P/E donut (Market Cap vs Earnings) with compact PE badge
 - Valuation/Profitability and Balance Sheet/CF sections
 
 Run:
@@ -18,7 +19,6 @@ Run:
     streamlit run bmps_onepager_streamlit.py
 """
 from __future__ import annotations
-
 import math
 from typing import Dict, List, Tuple
 
@@ -27,8 +27,32 @@ import pandas as pd
 import yfinance as yf
 import streamlit as st
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 
 st.set_page_config(page_title="BMPS – One-Pager", layout="wide")
+
+# ---------- Global style (compact, professional) ----------
+mpl.rcParams.update({
+    "font.size": 9,
+    "axes.titlesize": 11,
+    "axes.labelsize": 9,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "legend.fontsize": 8,
+    "figure.dpi": 120,
+})
+
+st.markdown(
+    """
+    <style>
+    .block-container {padding-top:0.6rem; padding-bottom:0.6rem;}
+    [data-testid="stMetricValue"] {font-size:1.12rem;}
+    [data-testid="stMetricLabel"] {font-size:0.74rem; color:#666;}
+    h1, h2, h3 {letter-spacing:0.2px}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ----------------------------------
 # Helpers
@@ -41,6 +65,7 @@ def safe_get(d: Dict, key: str, default=np.nan):
     except Exception:
         return default
 
+
 def currency_symbol(code: str) -> str:
     m = {
         "EUR": "€", "USD": "$", "GBP": "£", "JPY": "¥", "CHF": "CHF", "CAD": "$",
@@ -48,11 +73,10 @@ def currency_symbol(code: str) -> str:
     }
     return m.get(str(code).upper(), str(code))
 
+
 def bn(x: float) -> float:
     return float(x) / 1e9 if pd.notna(x) else np.nan
 
-def mm(x: float) -> float:
-    return float(x) / 1e6 if pd.notna(x) else np.nan
 
 def normalize_percent_robust(x: float) -> float:
     """Normalize percent/fraction reliably to 0..1, fixing 10.58/1058 style inputs."""
@@ -66,26 +90,28 @@ def normalize_percent_robust(x: float) -> float:
         y /= 100.0
     return np.nan if y < 0 else y
 
+
 def first_notna(*vals):
     for v in vals:
         if v is not None and not (isinstance(v, float) and math.isnan(v)):
             return v
     return np.nan
 
+
 def get_income_value(df: pd.DataFrame, candidates: List[str]) -> float:
     if not isinstance(df, pd.DataFrame) or df.empty:
         return np.nan
-    idx_map = {str(i).lower(): i for i in df.index}
+    idx_map = {i.lower(): i for i in df.index}
     for c in candidates:
         key = c.lower()
         if key in idx_map:
             ser = df.loc[idx_map[key]]
             try:
-                # Take the most recent non-NA (columns are dates)
                 return float(ser.dropna().iloc[0])
             except Exception:
                 continue
     return np.nan
+
 
 def load_ticker_info(ticker: str) -> Dict:
     t = yf.Ticker(ticker)
@@ -95,6 +121,7 @@ def load_ticker_info(ticker: str) -> Dict:
         info = {}
     fast = getattr(t, "fast_info", {}) or {}
     return {"ticker": t, "info": info, "fast": fast}
+
 
 def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
     """Dividend yield (0..1): info → rate/price → TTM fallback."""
@@ -115,19 +142,28 @@ def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
                     y = float(ttm / price)
         except Exception:
             pass
-    # Hard cap: reject obviously broken yields
     return np.nan if (pd.notna(y) and y > 0.5) else y
+
 
 def fmt_pct(x: float) -> str:
     return "n/a" if pd.isna(x) else f"{x*100:.2f}%"
 
+
 def fmt_money_bn(x: float, code: str) -> str:
     sym = currency_symbol(code)
-    return "n/a" if pd.isna(x) else f"{sym} {bn(x):.2f} bn ({code})"
+    return "n/a" if pd.isna(x) else f"{sym}{bn(x):.2f}b ({code})"
 
-# ----------------------------------
-# Sidebar Inputs
-# ----------------------------------
+
+# ---------- Compact axis styling ----------
+
+def style_axes(ax):
+    ax.grid(True, linestyle=":", alpha=0.22)
+    for spine in ax.spines.values():
+        spine.set_alpha(0.22)
+    ax.tick_params(labelsize=8)
+
+
+# ---------- Sidebar Inputs ----------
 left, right = st.columns([2, 1])
 with right:
     st.header("Parameters")
@@ -135,11 +171,10 @@ with right:
     years_window = st.slider("Price window (years)", min_value=1, max_value=10, value=3, step=1)
 
 with left:
-    st.title("SHI Management – STOCK PROFILE: One-Pager")
+    st.title("SHI Management – STOCK PROFILE: One‑Pager")
 
-# ----------------------------------
-# Load core data
-# ----------------------------------
+
+# ---------- Load core data ----------
 if ticker:
     data = load_ticker_info(ticker)
     tkr: yf.Ticker = data["ticker"]
@@ -153,20 +188,16 @@ if ticker:
     sector = safe_get(info, "sector", "")
     country = safe_get(info, "country", "")
     employees = safe_get(info, "fullTimeEmployees", np.nan)
-    exch = first_notna(safe_get(info, "fullExchangeName", None),
-                       safe_get(info, "exchange", None), "")
-    mktcap = first_notna(safe_get(info, "marketCap", None),
-                         safe_get(fast, "market_cap", None))
-    shares = first_notna(safe_get(info, "sharesOutstanding", None),
-                         safe_get(fast, "shares_outstanding", None))
-    price = first_notna(safe_get(info, "currentPrice", None),
-                        safe_get(fast, "last_price", None))
-    currency = first_notna(safe_get(info, "currency", None),
-                           safe_get(fast, "currency", None),
-                           "EUR")
+    exch = first_notna(safe_get(info, "fullExchangeName", None), safe_get(info, "exchange", None), "")
+    mktcap = first_notna(safe_get(info, "marketCap", None), safe_get(fast, "market_cap", None))
+    shares = first_notna(safe_get(info, "sharesOutstanding", None), safe_get(fast, "shares_outstanding", None))
+    price = first_notna(safe_get(info, "currentPrice", None), safe_get(fast, "last_price", None))
+    currency = safe_get(info, "currency", "EUR")
     sym = currency_symbol(currency)
+    # Robust chart label derived from live ticker info (prevents stale labels like 'LULU')
+    label_tkr = (safe_get(info, "symbol", None) or ticker).upper()
 
-    # KPIs (trailing P/E, etc.)
+    # KPIs
     trailing_pe = safe_get(info, "trailingPE", np.nan)
     forward_pe = safe_get(info, "forwardPE", np.nan)
     ps_ttm = safe_get(info, "priceToSalesTrailing12Months", np.nan)
@@ -198,19 +229,19 @@ if ticker:
 
     revenue = get_income_value(fin, ["Total Revenue", "Revenue"])  # absolute
     cost_rev = get_income_value(fin, ["Cost Of Revenue", "Cost of Revenue", "Cost of revenue"])
-    gross_profit = get_income_value(fin, ["Gross Profit", "Gross profit"])
+    gross_profit = get_income_value(fin, ["Gross Profit", "Gross profit"])  # falls NaN → später herleiten
     op_ex = get_income_value(fin, ["Total Operating Expenses", "Operating Expense", "Operating Expenses"])
     net_income = get_income_value(fin, ["Net Income", "Net income", "Net Income Common Stockholders"])
 
+    if pd.isna(gross_profit) and pd.notna(revenue) and pd.notna(cost_rev):
+        gross_profit = revenue - cost_rev
     other_expenses = np.nan
     if pd.notna(op_ex) and pd.notna(cost_rev):
         other_expenses = max(0.0, op_ex - cost_rev)
     else:
         other_expenses = op_ex
 
-    # ----------------------------------
-    # Header & Meta
-    # ----------------------------------
+    # ---------- Header & Meta ----------
     meta_col1, meta_col2, meta_col3 = st.columns([1.4, 1.1, 1.2])
     with meta_col1:
         st.subheader(long_name)
@@ -233,9 +264,7 @@ if ticker:
 
     st.markdown("---")
 
-    # ----------------------------------
-    # KPI Block (compact)
-    # ----------------------------------
+    # ---------- KPI Block (compact) ----------
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("P/E (Trailing)", f"{trailing_pe:.2f}" if pd.notna(trailing_pe) else "n/a")
     c2.metric("P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a")
@@ -243,43 +272,34 @@ if ticker:
     c4.metric("Dividend Yield", fmt_pct(dividend_yield))
     c5.metric("Payout Ratio", fmt_pct(payout_ratio))
 
-    # ----------------------------------
-    # P/E Donut (Market Cap vs Earnings)
-    # ----------------------------------
+    # ---------- P/E Donut (Market Cap vs Earnings) ----------
     st.markdown("---")
     donut_l, donut_r = st.columns([1, 1])
     with donut_l:
-        earnings = net_income  # ttm (approx via most recent row)
+        earnings = net_income  # ttm
         mc = mktcap
         if pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0:
-            figd, axd = plt.subplots(figsize=(5.0, 2.6))
+            figd, axd = plt.subplots(figsize=(4.6, 2.2))
             sizes = [earnings, max(mc - earnings, 0.0)]
             axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.28))
             axd.set_aspect('equal')
-            # Labels in axes coordinates to avoid clipping
-            axd.text(0.03, 0.90, "Earnings\n" + f"{sym}{bn(earnings):.2f}b",
-                     fontsize=9, ha='left', va='top', transform=axd.transAxes)
-            axd.text(0.50, 0.08, "Market Cap\n" + f"{sym}{bn(mc):.2f}b",
-                     fontsize=9, ha='center', va='bottom', transform=axd.transAxes)
-            plt.tight_layout()
+            axd.text(-1.05, 0.62, "Earnings
+" + f"{sym}{bn(earnings):.2f}b", fontsize=8.5, ha='left', va='center')
+            axd.text(0, -0.06, "Market Cap
+" + f"{sym}{bn(mc):.2f}b", fontsize=8.5, ha='center', va='center')
             st.pyplot(figd, clear_figure=True)
         else:
             st.caption("P/E donut unavailable (missing market cap or earnings).")
     with donut_r:
         if pd.notna(trailing_pe):
-            st.markdown(
-                f"<div style='font-size:42px;font-weight:700;line-height:1'>{trailing_pe:.1f}x</div>",
-                unsafe_allow_html=True
-            )
+            st.markdown(f"<div style='font-size:36px;font-weight:700;line-height:1'> {trailing_pe:.1f}x </div>", unsafe_allow_html=True)
             st.markdown("<div style='font-size:12px;color:#666'>PE Ratio</div>", unsafe_allow_html=True)
         else:
             st.caption("PE Ratio: n/a")
 
     st.markdown("---")
 
-    # ----------------------------------
-    # TWO CHARTS SIDE BY SIDE
-    # ----------------------------------
+    # ---------- Two charts side by side ----------
     ch_left, ch_right = st.columns(2)
 
     with ch_left:
@@ -288,16 +308,12 @@ if ticker:
             hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
             if isinstance(hist, pd.DataFrame) and not hist.empty:
                 series = hist["Close"].dropna()
-                figp, axp = plt.subplots(figsize=(5.0, 2.2))
+                figp, axp = plt.subplots(figsize=(4.8, 2.2))
                 axp.plot(series.index, series.values, linewidth=1.0)
-                axp.set_title(f"{ticker} – {years_window}y", fontsize=10)
+                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=10)
                 axp.set_xlabel("Date", fontsize=8)
                 axp.set_ylabel(f"Price ({currency})", fontsize=8)
-                axp.grid(True, linestyle=":", alpha=0.3)
-                axp.tick_params(labelsize=8)
-                for spine in axp.spines.values():
-                    spine.set_alpha(0.25)
-                plt.tight_layout()
+                style_axes(axp)
                 st.pyplot(figp, clear_figure=True)
             else:
                 st.info("No price history available.")
@@ -305,36 +321,34 @@ if ticker:
             st.warning(f"Could not load price data: {e}")
 
     with ch_right:
-        st.caption("Income (last period)")
-        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Other Expenses", "Net Income"]
-        values = [bn(revenue), bn(cost_rev), bn(gross_profit), bn(other_expenses), bn(net_income)]
-        df_plot = pd.DataFrame({"Item": names, "Value": values})
-        fig, ax = plt.subplots(figsize=(5.0, 2.2))
-        ax.bar(df_plot["Item"], df_plot["Value"])
+        st.caption("Earnings & Revenue (last period)")
+        # Stylized bars (waterfall-like): Revenue, Cost of Revenue, Gross Profit, Other Expenses, Earnings
+        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Other Expenses", "Earnings"]
+        gross_val = gross_profit if pd.notna(gross_profit) else (revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan)
+        vals_abs = [bn(revenue), bn(cost_rev), bn(gross_val), bn(other_expenses), bn(net_income)]
+        colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#b04a4a", "#17becf"]  # blue, red, green, red, teal
+        fig, ax = plt.subplots(figsize=(4.8, 2.2))
+        x = np.arange(len(names))
+        bars = ax.bar(x, vals_abs, color=colors, width=0.6)
         ax.set_ylabel(f"{sym} bn ({currency})", fontsize=8)
-        ax.set_title(f"BMPS – {currency}", fontsize=10)
-        for i, v in enumerate(values):
+        ax.set_title(f"{label_tkr} – {currency}", fontsize=10)
+        ax.set_xticks(x)
+        ax.set_xticklabels(names, rotation=10)
+        style_axes(ax)
+        # Value labels on top
+        for rect, v in zip(bars, vals_abs):
             if pd.notna(v):
-                ax.text(i, max(v, 0), f"{v:.2f}", ha='center', va='bottom', fontsize=7)
-        plt.xticks(rotation=12)
-        ax.grid(axis='y', linestyle=":", alpha=0.25)
-        ax.tick_params(labelsize=8)
-        for spine in ax.spines.values():
-            spine.set_alpha(0.25)
-        plt.tight_layout()
+                ax.text(rect.get_x() + rect.get_width()/2, rect.get_height(), f"{sym}{v:.2f}b", ha='center', va='bottom', fontsize=8)
         st.pyplot(fig, clear_figure=True)
 
     st.markdown("---")
 
-    # ----------------------------------
-    # Valuation & Profitability
-    # ----------------------------------
+    # ---------- Valuation & Profitability ----------
     st.subheader("Valuation & Profitability")
 
     ev = safe_get(info, "enterpriseValue", np.nan)
     peg = safe_get(info, "pegRatio", np.nan)
-    ev_rev = first_notna(safe_get(info, "enterpriseToRevenue", None),
-                         safe_get(info, "enterpriseToRev", None), np.nan)
+    ev_rev = first_notna(safe_get(info, "enterpriseToRevenue", None), safe_get(info, "enterpriseToRev", None), np.nan)
     ev_ebitda = safe_get(info, "enterpriseToEbitda", np.nan)
     profit_margin = safe_get(info, "profitMargins", np.nan)
     roa = safe_get(info, "returnOnAssets", np.nan)
@@ -361,9 +375,7 @@ if ticker:
 
     st.markdown("---")
 
-    # ----------------------------------
-    # Balance Sheet & Cash Flow
-    # ----------------------------------
+    # ---------- Balance Sheet & Cash Flow ----------
     st.subheader("Balance Sheet & Cash Flow")
 
     total_cash = safe_get(info, "totalCash", np.nan)  # mrq
@@ -372,7 +384,6 @@ if ticker:
 
     d_to_e_disp = "n/a"
     if pd.notna(d_to_e):
-        # Some tickers report as percent; heuristics:
         if d_to_e > 5:
             d_to_e_disp = f"{d_to_e:.1f}% (~{d_to_e/100:.2f}×)"
         else:
@@ -389,25 +400,15 @@ if ticker:
 
     st.markdown("---")
 
-    # ----------------------------------
-    # Raw data & export
-    # ----------------------------------
+    # ---------- Raw data & export ----------
     st.subheader("Raw data & export")
     meta_table = pd.DataFrame({
-        "Field": ["Name","Ticker","Exchange","Country","Industry","Sector","Employees",
-                  "Currency","MarketCap (bn)","Shares (bn)","Price"],
-        "Value": [long_name, ticker, exch, country, industry, sector,
-                  (int(employees) if pd.notna(employees) else np.nan),
-                  currency, bn(mktcap), bn(shares), price]
+        "Field": ["Name","Ticker","Exchange","Country","Industry","Sector","Employees","Currency","MarketCap (bn)","Shares (bn)","Price"],
+        "Value": [long_name,ticker,exch,country,industry,sector,employees,currency,bn(mktcap),bn(shares),price]
     })
     st.dataframe(meta_table, use_container_width=True)
 
-    st.download_button(
-        "Download CSV (meta)",
-        data=meta_table.to_csv(index=False).encode("utf-8"),
-        file_name=f"{ticker}_meta.csv",
-        mime="text/csv"
-    )
+    st.download_button("Download CSV (meta)", data=meta_table.to_csv(index=False).encode("utf-8"), file_name=f"{ticker}_meta.csv", mime="text/csv")
 
 else:
     st.info("Enter a Yahoo ticker, e.g., BMPS.MI.")
