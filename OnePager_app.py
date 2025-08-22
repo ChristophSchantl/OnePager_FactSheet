@@ -3,12 +3,13 @@
 """
 Banca Monte dei Paschi di Siena (BMPS) – One-Pager (Streamlit)
 
-
 Korrekturen & Add-ons:
-- Feld "Founded" entfernt
-- Dividend Yield robust normalisiert (0–1 oder 0–100) + TTM-Fallback aus Dividendenhistorie
-- 3‑Jahres Kurschart (flexibel einstellbare Jahre, 1–10) mit Close
-- Saubere Anzeige/Abfang fehlender EU‑Holderdaten
+- Peer-Vergleich entfernt
+- "Forward P/E" entfernt; Anzeige nur aktuelles P/E (trailing)
+- Dividend Yield robust normalisiert (Skalenfehler -> automatisch korrigiert) + Fallbacks (Rate/Preis, TTM)
+- Kurschart verkleinert (7×3) und Zeitraum wahlweise per Jahre-Slider **oder** Start/End-Datum
+- Income-Grafik und alle Labels mit korrekter Währung (Symbol + Code)
+- EU-Holder-Sektion entfernt
 
 Start:
     pip install streamlit yfinance pandas numpy matplotlib
@@ -16,6 +17,7 @@ Start:
 """
 from __future__ import annotations
 import math
+from datetime import date, timedelta
 from typing import Dict, List
 
 import numpy as np
@@ -42,13 +44,21 @@ def bn(x: float) -> float:
     return float(x) / 1e9 if pd.notna(x) else np.nan
 
 
-def normalize_percent(x: float) -> float:
-    """Bringt gemischte Prozent-/Fraktionswerte in eine Fraktion (0..1)."""
+def normalize_percent_robust(x: float) -> float:
+    """Normalisiert Prozent/Fraction zuverlässig auf eine Fraktion (0..1).
+    Korrigiert übergroße Skalen wie 10.58 (10,58%) oder 1058 (1.058%) durch wiederholtes /100.
+    """
     if pd.isna(x):
         return np.nan
-    if 1.0 < x <= 100.0:
-        return float(x) / 100.0
-    return float(x)
+    try:
+        y = float(x)
+    except Exception:
+        return np.nan
+    while y > 1.0:
+        y /= 100.0
+    if y < 0:
+        return np.nan
+    return y
 
 
 def first_notna(*vals):
@@ -84,13 +94,25 @@ def load_ticker_info(ticker: str) -> Dict:
 
 
 def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
-    """Robuste Ermittlung der Dividendenrendite (Fraktion). Reihenfolge:
-    1) info['dividendYield'] (normalisiert), 2) trailingAnnualDividendYield (normalisiert),
-    3) TTM-Fallback: Summe der letzten 4 Quartalsdividenden / Preis
+    """Robuste Ermittlung der Dividendenrendite (Fraktion 0..1).
+    Reihenfolge:
+      1) dividendYield / trailingAnnualDividendYield (robust normalisiert)
+      2) trailingAnnualDividendRate / Preis (falls vorhanden)
+      3) TTM‑Fallback: Summe der letzten 12 Monate Dividenden / Preis
     """
-    y0 = normalize_percent(safe_get(info, "dividendYield", np.nan))
-    y1 = normalize_percent(safe_get(info, "trailingAnnualDividendYield", np.nan))
-    y = first_notna(y0, y1, np.nan)
+    y0 = normalize_percent_robust(safe_get(info, "dividendYield", np.nan))
+    y1 = normalize_percent_robust(safe_get(info, "trailingAnnualDividendYield", np.nan))
+    rate = safe_get(info, "trailingAnnualDividendRate", np.nan)
+    y2 = np.nan
+    if pd.notna(rate) and pd.notna(price) and price > 0:
+        y2 = float(rate) / float(price)
+
+    for cand in (y0, y1, y2):
+        if pd.notna(cand) and 0 < cand < 1.0:
+            y = cand
+            break
+    else:
+        y = np.nan
 
     if (pd.isna(y) or y == 0.0) and pd.notna(price) and price > 0:
         try:
@@ -102,6 +124,9 @@ def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
                     y = float(ttm_sum / price)
         except Exception:
             pass
+
+    if pd.notna(y) and y > 0.5:
+        y = np.nan
     return y
 
 # ----------------------------------
@@ -112,10 +137,13 @@ with right:
     st.header("⚙️ Parameter")
     ticker = st.text_input("Ticker ", value="BMPS.MI").strip()
     currency_hint = st.text_input("Währungssymbol (Anzeige)", value="€")
-    peers_default = "FBK.MI, MB.MI, BPE.MI, BAMI.MI"
-    peers_text = st.text_input("Peer‑Ticker (kommagetrennt)", value=peers_default)
-    years_window = st.slider("Kurs-Zeitraum (Jahre)", min_value=1, max_value=10, value=3, step=1)
-    reload_btn = st.button("Neu laden")
+
+    period_mode = st.radio("Zeitraum wählen", ["Jahre (Slider)", "Start/End Datum"], index=0)
+    years_window = st.slider("Kurs‑Zeitraum (Jahre)", min_value=1, max_value=10, value=3, step=1)
+    start_date = st.date_input("Start‑Datum", value=date.today() - timedelta(days=365*3))
+    end_date = st.date_input("End‑Datum", value=date.today())
+
+    st.caption("Peers & Eigentümer ausgeblendet (auf Wunsch wieder aktivierbar).")
 
 with left:
     st.title("SHI Management – STOCK PROFILE: One‑Pager")
@@ -143,15 +171,14 @@ if ticker:
     price = first_notna(safe_get(info, "currentPrice", None), safe_get(fast, "last_price", None))
     currency = safe_get(info, "currency", "EUR")
 
-    # Valuation ratios
+    # Valuation ratios (nur aktuelles P/E)
     trailing_pe = safe_get(info, "trailingPE", np.nan)
-    forward_pe = safe_get(info, "forwardPE", np.nan)
     ps_ttm = safe_get(info, "priceToSalesTrailing12Months", np.nan)
     pb = first_notna(safe_get(info, "priceToBook", None), np.nan)
 
-    # Dividende
+    # Dividende – korrigiert
     dividend_yield = compute_dividend_yield(tkr, price, info)  # Fraktion 0..1
-    payout_ratio = normalize_percent(safe_get(info, "payoutRatio", np.nan))
+    payout_ratio = normalize_percent_robust(safe_get(info, "payoutRatio", np.nan))
 
     # Earnings dates
     ed = safe_get(info, "earningsDate", [])
@@ -189,7 +216,7 @@ if ticker:
         other_expenses = op_ex
 
     # ----------------------------------
-    # Header & Meta (ohne Founded)
+    # Header & Meta
     # ----------------------------------
     meta_col1, meta_col2, meta_col3 = st.columns([1.4, 1.1, 1.2])
     with meta_col1:
@@ -209,36 +236,38 @@ if ticker:
         st.markdown(f"**Current Price:** {price if pd.notna(price) else 'n/a'} {currency}")
         st.markdown(f"**Next earnings:** {next_earnings or 'n/a'}")
 
-    # Kurzbeschreibung
     if long_summary:
         st.caption(long_summary)
 
     st.markdown("---")
 
     # ----------------------------------
-    # Valuation block
+    # Valuation block (aktuelles P/E)
     # ----------------------------------
-    v1, v2, v3, v4, v5, v6 = st.columns(6)
-    v1.metric("Price‑Earning (Trailing)", f"{trailing_pe:.2f}" if pd.notna(trailing_pe) else "n/a")
-    v2.metric("Price‑Earning (Forward)", f"{forward_pe:.2f}" if pd.notna(forward_pe) else "n/a")
-    v3.metric("Price‑Sales (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a")
-    v4.metric("Price‑Book", f"{pb:.2f}" if pd.notna(pb) else "n/a")
-    v5.metric("Dividend Yield", f"{dividend_yield*100:.2f}%" if pd.notna(dividend_yield) else "n/a")
-    v6.metric("Payout Ratio", f"{payout_ratio*100:.1f}%" if pd.notna(payout_ratio) else "n/a")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Price‑Earnings (Current)", f"{trailing_pe:.2f}" if pd.notna(trailing_pe) else "n/a")
+    c2.metric("Price‑Sales (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a")
+    c3.metric("Price‑Book", f"{pb:.2f}" if pd.notna(pb) else "n/a")
+    c4.metric("Dividend Yield", f"{dividend_yield*100:.2f}%" if pd.notna(dividend_yield) else "n/a")
+    c5.metric("Payout Ratio", f"{payout_ratio*100:.1f}%" if pd.notna(payout_ratio) else "n/a")
 
     st.markdown("---")
 
     # ----------------------------------
-    # Price Chart – flexibel (Jahre 1..10)
+    # Price Chart – Close, klein & mit Datumsauswahl
     # ----------------------------------
     st.subheader("Preisverlauf (Close)")
     try:
-        hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
+        if period_mode == "Start/End Datum":
+            hist = yf.download(ticker, start=pd.to_datetime(start_date), end=pd.to_datetime(end_date) + pd.Timedelta(days=1), interval="1d", progress=False)
+        else:
+            hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
         if isinstance(hist, pd.DataFrame) and not hist.empty:
             series = hist["Close"].dropna()
-            figp, axp = plt.subplots(figsize=(10, 4))
+            figp, axp = plt.subplots(figsize=(7, 3))
             axp.plot(series.index, series.values)
-            axp.set_title(f"{ticker} – {years_window}J Close")
+            title_range = f"{years_window}J" if period_mode != "Start/End Datum" else f"{pd.to_datetime(start_date).date()} → {pd.to_datetime(end_date).date()}"
+            axp.set_title(f"{ticker} – {title_range} Close")
             axp.set_xlabel("Datum")
             axp.set_ylabel(f"Preis ({currency})")
             axp.grid(True, linestyle=":", alpha=0.4)
@@ -251,97 +280,21 @@ if ticker:
     st.markdown("---")
 
     # ----------------------------------
-    # Income Statement Bars & Peers
+    # Income Statement Bars (mit Währungsangabe)
     # ----------------------------------
-    cols = st.columns([1.2, 1.4])
-    with cols[0]:
-        st.subheader("Income (zuletzt verfügbar, Mrd)")
-        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Other Expenses", "Net Income"]
-        values = [bn(revenue), bn(cost_rev), bn(gross_profit), bn(other_expenses), bn(net_income)]
-        df_plot = pd.DataFrame({"Item": names, "Value": values})
-        fig, ax = plt.subplots(figsize=(6.5, 4.0))
-        ax.bar(df_plot["Item"], df_plot["Value"]) 
-        ax.set_ylabel("€ bn")
-        ax.set_title("BMPS – Ergebnisblöcke (letzte Periode)")
-        for i, v in enumerate(values):
-            if pd.notna(v):
-                ax.text(i, v if v >= 0 else 0, f"{v:.2f}", ha='center', va='bottom')
-        plt.xticks(rotation=15)
-        st.pyplot(fig, clear_figure=True)
-
-    with cols[1]:
-        st.subheader("Peers – Forward P/E & Market Cap")
-        peers = [p.strip() for p in peers_text.split(',') if p.strip()]
-        peer_rows = []
-        for p in peers:
-            try:
-                pi = load_ticker_info(p)
-                pinf = pi["info"]
-                fpe = safe_get(pinf, "forwardPE", np.nan)
-                cap = safe_get(pinf, "marketCap", np.nan)
-                lname = safe_get(pinf, "longName", p)
-                if pd.notna(fpe):
-                    peer_rows.append((lname, p, float(fpe), bn(cap)))
-            except Exception:
-                continue
-        peer_df = pd.DataFrame(peer_rows, columns=["Company", "Ticker", "Forward PE", "MktCap (bn)"]).sort_values("Forward PE")
-        if not peer_df.empty:
-            fig2, ax2 = plt.subplots(figsize=(6.8, 4.2))
-            ax2.barh(peer_df["Company"], peer_df["Forward PE"])  
-            for i, (pe, cap) in enumerate(zip(peer_df["Forward PE"], peer_df["MktCap (bn)"])):
-                ax2.text(pe, i, f"  PE {pe:.1f} | MCap {cap:.1f}bn", va='center')
-            ax2.set_xlabel("Forward P/E")
-            ax2.set_title("Peer‑Vergleich")
-            st.pyplot(fig2, clear_figure=True)
-            st.dataframe(peer_df, use_container_width=True)
-        else:
-            st.info("Keine Peer‑Daten verfügbar.")
-
-    st.markdown("---")
-
-    # ----------------------------------
-    # Ownership – falls verfügbar
-    # ----------------------------------
-    own1, own2 = st.columns([1.2, 1.0])
-
-    with own1:
-        st.subheader("Top Holder (falls vorhanden)")
-        holders_df = None
-        try:
-            inst = tkr.institutional_holders
-            if isinstance(inst, pd.DataFrame) and not inst.empty:
-                holders_df = inst.copy()
-                holders_df.rename(columns={"% Out": "% Out"}, inplace=True)
-        except Exception:
-            holders_df = None
-        if holders_df is not None:
-            st.dataframe(holders_df.head(10), use_container_width=True)
-        else:
-            st.caption("")
-
-    with own2:
-        st.subheader("Eigentümer‑Kreise (Skizze)")
-        labels = []
-        sizes = []
-        try:
-            mh = tkr.major_holders
-            if isinstance(mh, pd.DataFrame) and not mh.empty:
-                for row in mh.iloc[:, 0].astype(str).tolist():
-                    labels.append(row)
-                for val in mh.iloc[:, 1].astype(str).tolist():
-                    try:
-                        sizes.append(float(val.strip('%')))
-                    except Exception:
-                        sizes.append(np.nan)
-        except Exception:
-            pass
-        if sizes and all(pd.notna(s) for s in sizes):
-            fig3, ax3 = plt.subplots(figsize=(5.0, 5.0))
-            ax3.pie(sizes, labels=labels, autopct="%1.1f%%")
-            ax3.set_title("Major Holders")
-            st.pyplot(fig3, clear_figure=True)
-        else:
-            st.caption("Major‑Holder‑Anteile nicht verfügbar.")
+    st.subheader("Income (zuletzt verfügbar)")
+    names = ["Revenue", "Cost of Revenue", "Gross Profit", "Other Expenses", "Net Income"]
+    values = [bn(revenue), bn(cost_rev), bn(gross_profit), bn(other_expenses), bn(net_income)]
+    df_plot = pd.DataFrame({"Item": names, "Value": values})
+    fig, ax = plt.subplots(figsize=(6.0, 3.6))
+    ax.bar(df_plot["Item"], df_plot["Value"]) 
+    ax.set_ylabel(f"{currency_hint} bn ({currency})")
+    ax.set_title(f"BMPS – Ergebnisblöcke (letzte Periode) – Werte in {currency}")
+    for i, v in enumerate(values):
+        if pd.notna(v):
+            ax.text(i, v if v >= 0 else 0, f"{v:.2f}", ha='center', va='bottom')
+    plt.xticks(rotation=15)
+    st.pyplot(fig, clear_figure=True)
 
     st.markdown("---")
 
