@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 # ---------- Streamlit page ----------
-st.set_page_config(page_title="BMPS – One-Pager", layout="wide")
+st.set_page_config(page_title="One-Pager", layout="wide")
 
 # ---------- Global typography & figure style ----------
 mpl.rcParams.update({
@@ -145,7 +145,7 @@ with right:
     years_window = st.slider("Price window (years)", min_value=1, max_value=10, value=3, step=1)
 
 with left:
-    st.markdown("<h1 class='page-title'>SHI Management – STOCK PROFILE: One-Pager</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='page-title'>SHI - STOCK QICK CHECK </h1>", unsafe_allow_html=True)
 
 # ---------- Core ----------
 if ticker:
