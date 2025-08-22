@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 import math
 from typing import Dict, List, Tuple
@@ -61,7 +62,6 @@ def normalize_percent_robust(x: float) -> float:
         y = float(x)
     except Exception:
         return np.nan
-    # repeatedly divide by 100 until <=1
     while y > 1.0:
         y /= 100.0
     return np.nan if y < 0 else y
@@ -114,7 +114,6 @@ def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
                     y = float(ttm / price)
         except Exception:
             pass
-    # guard against crazy values (>50%)
     if pd.notna(y) and y > 0.5:
         return np.nan
     return y
@@ -194,11 +193,11 @@ if ticker:
         fin_q = pd.DataFrame()
     fin = fin_a if isinstance(fin_a, pd.DataFrame) and not fin_a.empty else fin_q
 
-    revenue     = get_income_value(fin, ["Total Revenue", "Revenue"])            # abs
-    cost_rev    = get_income_value(fin, ["Cost Of Revenue", "Cost of Revenue", "Cost of revenue"])
+    revenue      = get_income_value(fin, ["Total Revenue", "Revenue"])
+    cost_rev     = get_income_value(fin, ["Cost Of Revenue", "Cost of Revenue", "Cost of revenue"])
     gross_profit = get_income_value(fin, ["Gross Profit", "Gross profit"])
-    op_ex       = get_income_value(fin, ["Total Operating Expenses", "Operating Expense", "Operating Expenses"])
-    net_income  = get_income_value(fin, ["Net Income", "Net income", "Net Income Common Stockholders"])
+    op_ex        = get_income_value(fin, ["Total Operating Expenses", "Operating Expense", "Operating Expenses"])
+    net_income   = get_income_value(fin, ["Net Income", "Net income", "Net Income Common Stockholders"])
 
     if pd.isna(gross_profit) and pd.notna(revenue) and pd.notna(cost_rev):
         gross_profit = revenue - cost_rev
@@ -240,41 +239,29 @@ if ticker:
 
     # ---------- P/E Donut (small, no right-side label) ----------
     st.markdown("---")
-    donut_l, _ = st.columns([0.9, 1.1])  # rechter Platz nur als Spacer
-    
+    donut_l, _spacer = st.columns([0.9, 1.1])  # rechts nur Spacer
+
     with donut_l:
         nic_ttm = safe_get(info, "netIncomeToCommon", np.nan)
         earnings = nic_ttm
         mc = mktcap
         if pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0:
-            figd, axd = plt.subplots(figsize=(2.8, 1.6))   # klein
+            figd, axd = plt.subplots(figsize=(2.8, 1.6))  # klein
             sizes = [earnings, max(mc - earnings, 0.0)]
             axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.22))
             axd.set_aspect("equal")
-    
+
             earn_lbl = f"{sym}{bn(earnings):.2f}b"
             mc_lbl   = f"{sym}{bn(mc):.2f}b"
             axd.text(-0.75, 0.52, f"Earnings\n{earn_lbl}", fontsize=7.5, ha="left",  va="center")
             axd.text( 0.00, -0.04, f"Market Cap\n{mc_lbl}", fontsize=7.5, ha="center", va="center")
-    
+
             figd.tight_layout(pad=0.4)
             st.pyplot(figd, clear_figure=True)
         else:
             st.caption("P/E donut unavailable (missing market cap or earnings).")
-    
-        
-        with donut_r:
-            if pd.notna(trailing_pe):
-                st.markdown(
-                    f"<div style='font-size:42px;font-weight:800;line-height:1'>{trailing_pe:.1f}x</div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown("<div style='font-size:12px;color:#666'>PE Ratio</div>", unsafe_allow_html=True)
-            else:
-                st.caption("PE Ratio: n/a")
-    
-    
-        st.markdown("---")
+
+    st.markdown("---")
 
     # ---------- Two charts side by side ----------
     ch_left, ch_right = st.columns(2)
@@ -287,7 +274,7 @@ if ticker:
             if isinstance(hist, pd.DataFrame) and not hist.empty:
                 series = hist["Close"].dropna()
                 figp, axp = plt.subplots(figsize=(4.8, 2.2))
-                axp.plot(series.index, series.values, linewidth=0.5)
+                axp.plot(series.index, series.values, linewidth=0.8)
                 axp.set_title(f"{label_tkr} – {years_window}y", fontsize=10)
                 axp.set_xlabel("Date", fontsize=8)
                 axp.set_ylabel(f"Price ({currency})", fontsize=8)
@@ -327,14 +314,14 @@ if ticker:
     # ---------- Valuation & Profitability ----------
     st.subheader("Valuation & Profitability")
 
-    ev        = safe_get(info, "enterpriseValue", np.nan)
-    peg       = safe_get(info, "pegRatio", np.nan)
-    ev_rev    = first_notna(safe_get(info, "enterpriseToRevenue", None),
-                            safe_get(info, "enterpriseToRev", None), np.nan)
-    ev_ebitda = safe_get(info, "enterpriseToEbitda", np.nan)
-    profit_m  = safe_get(info, "profitMargins", np.nan)
-    roa       = safe_get(info, "returnOnAssets", np.nan)
-    roe       = safe_get(info, "returnOnEquity", np.nan)
+    ev         = safe_get(info, "enterpriseValue", np.nan)
+    peg        = safe_get(info, "pegRatio", np.nan)
+    ev_rev     = first_notna(safe_get(info, "enterpriseToRevenue", None),
+                             safe_get(info, "enterpriseToRev", None), np.nan)
+    ev_ebitda  = safe_get(info, "enterpriseToEbitda", np.nan)
+    profit_m   = safe_get(info, "profitMargins", np.nan)
+    roa        = safe_get(info, "returnOnAssets", np.nan)
+    roe        = safe_get(info, "returnOnEquity", np.nan)
     revenue_ttm = safe_get(info, "totalRevenue", np.nan)
     nic_ttm     = safe_get(info, "netIncomeToCommon", np.nan)
 
