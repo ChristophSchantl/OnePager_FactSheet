@@ -145,7 +145,7 @@ with right:
     years_window = st.slider("Price window (years)", min_value=1, max_value=10, value=3, step=1)
 
 with left:
-    st.markdown("<h1 class='page-title'>SHI - STOCK QICK CHECK </h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='page-title'>SHI - STOCK CHECK </h1>", unsafe_allow_html=True)
 
 # ---------- Core ----------
 if ticker:
