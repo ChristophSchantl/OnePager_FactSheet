@@ -232,7 +232,7 @@ if ticker:
 
     # ---------- KPI Block ----------
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("P/E (Trailing)", f"{trailing_pe:.2f}" if pd.notna(trailing_pe) else "n/a")
+    k1.metric("P/E Ratio", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a")
     k2.metric("P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a")
     k3.metric("P/B", f"{pb:.2f}" if pd.notna(pb) else "n/a")
     k4.metric("Dividend Yield", fmt_pct(dividend_yield))
