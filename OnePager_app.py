@@ -238,24 +238,22 @@ if ticker:
     k4.metric("Dividend Yield", fmt_pct(dividend_yield))
     k5.metric("Payout Ratio", fmt_pct(payout_ratio))
 
-    # ---------- P/E Donut ----------
+    # ---------- P/E Donut (small, no right-side label) ----------
     st.markdown("---")
-    donut_l, donut_r = st.columns([0.9, 1.1])  # kleiner Chart links, großer Wert rechts
+    donut_l, _ = st.columns([0.9, 1.1])  # rechter Platz nur als Spacer
     
     with donut_l:
         nic_ttm = safe_get(info, "netIncomeToCommon", np.nan)
         earnings = nic_ttm
         mc = mktcap
         if pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0:
-            figd, axd = plt.subplots(figsize=(2.8, 1.6))  # <<< deutlich kleiner
+            figd, axd = plt.subplots(figsize=(2.8, 1.6))   # klein
             sizes = [earnings, max(mc - earnings, 0.0)]
-            axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.22))  # schmalerer Ring
+            axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.22))
             axd.set_aspect("equal")
     
-            earn_lbl = f"{sym}{bn(earnings):.2f}b" if pd.notna(earnings) else "n/a"
-            mc_lbl   = f"{sym}{bn(mc):.2f}b"       if pd.notna(mc)       else "n/a"
-    
-            # kompaktere Beschriftung
+            earn_lbl = f"{sym}{bn(earnings):.2f}b"
+            mc_lbl   = f"{sym}{bn(mc):.2f}b"
             axd.text(-0.75, 0.52, f"Earnings\n{earn_lbl}", fontsize=7.5, ha="left",  va="center")
             axd.text( 0.00, -0.04, f"Market Cap\n{mc_lbl}", fontsize=7.5, ha="center", va="center")
     
@@ -264,15 +262,16 @@ if ticker:
         else:
             st.caption("P/E donut unavailable (missing market cap or earnings).")
     
-    with donut_r:
-        if pd.notna(trailing_pe):
-            st.markdown(
-                f"<div style='font-size:42px;font-weight:800;line-height:1'>{trailing_pe:.1f}x</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown("<div style='font-size:12px;color:#666'>PE Ratio</div>", unsafe_allow_html=True)
-        else:
-            st.caption("PE Ratio: n/a")
+        
+        with donut_r:
+            if pd.notna(trailing_pe):
+                st.markdown(
+                    f"<div style='font-size:42px;font-weight:800;line-height:1'>{trailing_pe:.1f}x</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown("<div style='font-size:12px;color:#666'>PE Ratio</div>", unsafe_allow_html=True)
+            else:
+                st.caption("PE Ratio: n/a")
     
     
         st.markdown("---")
@@ -288,7 +287,7 @@ if ticker:
             if isinstance(hist, pd.DataFrame) and not hist.empty:
                 series = hist["Close"].dropna()
                 figp, axp = plt.subplots(figsize=(4.8, 2.2))
-                axp.plot(series.index, series.values, linewidth=1.0)
+                axp.plot(series.index, series.values, linewidth=0.5)
                 axp.set_title(f"{label_tkr} – {years_window}y", fontsize=10)
                 axp.set_xlabel("Date", fontsize=8)
                 axp.set_ylabel(f"Price ({currency})", fontsize=8)
