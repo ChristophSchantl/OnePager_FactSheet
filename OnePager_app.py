@@ -1,14 +1,17 @@
-
+# bmps_onepager_streamlit.py
+# -*- coding: utf-8 -*-
 """
+Banca Monte dei Paschi di Siena (BMPS) – One-Pager (Streamlit)
+
 Updates:
 - Compact header; simplified layout
 - All UI labels in **English**
-- No manual currency symbol input; infer symbol from Yahoo `currency`
+- Removed manual currency symbol input; infer from Yahoo `currency`
+- **Removed custom start/end date inputs** → only a years slider remains
 - Small, subtle charts; two charts per row (Price left, Income right)
 - Owner/Peers removed
 - KPI block uses **Trailing P/E**; Forward P/E only in Valuation Measures
 - Robust dividend yield (scale fixes + TTM fallback)
-- Price chart: choose by years or custom date range
 - Income chart shows **correct currency** (symbol + code)
 - Added **P/E donut** (Market Cap vs Earnings) with big PE badge
 - Valuation/Profitability and Balance Sheet/CF sections
@@ -19,7 +22,6 @@ Run:
 """
 from __future__ import annotations
 import math
-from datetime import date, timedelta
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -140,11 +142,7 @@ left, right = st.columns([2, 1])
 with right:
     st.header("Parameters")
     ticker = st.text_input("Ticker", value="BMPS.MI").strip()
-
-    period_mode = st.radio("Time range", ["Years (slider)", "Start/End date"], index=0)
     years_window = st.slider("Price window (years)", min_value=1, max_value=10, value=3, step=1)
-    start_date = st.date_input("Start date", value=date.today() - timedelta(days=365*3))
-    end_date = st.date_input("End date", value=date.today())
 
 with left:
     st.title("SHI Management – STOCK PROFILE: One‑Pager")
@@ -262,7 +260,6 @@ if ticker:
             sizes = [earnings, max(mc - earnings, 0.0)]
             wedges, _ = axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.28))
             axd.set_aspect('equal')
-            # labels
             axd.text(-1.1, 0.65, "Earnings
 " + f"{sym}{bn(earnings):.2f}b", fontsize=9, ha='left', va='center')
             axd.text(0, -0.05, "Market Cap
@@ -287,16 +284,12 @@ if ticker:
     with ch_left:
         st.caption("Price (Close)")
         try:
-            if period_mode == "Start/End date":
-                hist = yf.download(ticker, start=pd.to_datetime(start_date), end=pd.to_datetime(end_date) + pd.Timedelta(days=1), interval="1d", progress=False)
-            else:
-                hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
+            hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
             if isinstance(hist, pd.DataFrame) and not hist.empty:
                 series = hist["Close"].dropna()
                 figp, axp = plt.subplots(figsize=(5.0, 2.2))
                 axp.plot(series.index, series.values, linewidth=1.0)
-                title_range = f"{years_window}y" if period_mode != "Start/End date" else f"{pd.to_datetime(start_date).date()} → {pd.to_datetime(end_date).date()}"
-                axp.set_title(f"{ticker} – {title_range}", fontsize=10)
+                axp.set_title(f"{ticker} – {years_window}y", fontsize=10)
                 axp.set_xlabel("Date", fontsize=8)
                 axp.set_ylabel(f"Price ({currency})", fontsize=8)
                 axp.grid(True, linestyle=":", alpha=0.3)
@@ -405,3 +398,4 @@ if ticker:
 
 else:
     st.info("Enter a Yahoo ticker, e.g., BMPS.MI.")
+
