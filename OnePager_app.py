@@ -1,5 +1,3 @@
-# bmps_onepager_streamlit.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 import math
 from typing import Dict, List, Tuple
@@ -202,11 +200,15 @@ if ticker:
     revenue      = get_income_value(fin, ["Total Revenue", "Revenue"])
     cost_rev     = get_income_value(fin, ["Cost Of Revenue", "Cost of Revenue", "Cost of revenue"])
     gross_profit = get_income_value(fin, ["Gross Profit", "Gross profit"])
+    op_ex        = get_income_value(fin, ["Total Operating Expenses", "Operating Expense", "Operating Expenses"])
     net_income   = get_income_value(fin, ["Net Income", "Net income", "Net Income Common Stockholders"])
 
     if pd.isna(gross_profit) and pd.notna(revenue) and pd.notna(cost_rev):
         gross_profit = revenue - cost_rev
-
+    if pd.notna(op_ex) and pd.notna(cost_rev):
+        other_expenses = max(0.0, op_ex - cost_rev)
+    else:
+        other_expenses = op_ex
 
     # ---------- Header & Meta ----------
     meta_col1, meta_col2, meta_col3 = st.columns([1.4, 1.1, 1.2])
@@ -270,12 +272,12 @@ if ticker:
     # Income stylized bars
     with ch_right:
         st.caption("Earnings & Revenue (last period)")
-        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]
+        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Other Expenses", "Earnings"]
         gross_val = gross_profit if pd.notna(gross_profit) else (
             revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan
         )
-        vals_abs = [bn(revenue), bn(cost_rev), bn(gross_val), bn(net_income)]
-        colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#17becf"]
+        vals_abs = [bn(revenue), bn(cost_rev), bn(gross_val), bn(other_expenses), bn(net_income)]
+        colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#b04a4a", "#17becf"]
 
         fig, ax = plt.subplots(figsize=(4.6, 2.0))
         x = np.arange(len(names))
@@ -348,3 +350,5 @@ if ticker:
 
 else:
     st.info("Enter a Yahoo ticker, e.g., BMPS.MI.")
+
+
