@@ -56,9 +56,20 @@ st.markdown(
 def safe_get(d: Dict, key: str, default=np.nan):
     try:
         v = d.get(key, default)
-        return np.nan if v is None else v
+        # None oder NaN als "nicht vorhanden" behandeln
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            return default
+        return v
     except Exception:
         return default
+
+def coerce_symbol(info_dict: Dict, fallback) -> str:
+    s = info_dict.get("symbol") if isinstance(info_dict, dict) else None
+    if isinstance(s, str) and s.strip():
+        return s.strip().upper()
+    if isinstance(fallback, str) and fallback.strip():
+        return fallback.strip().upper()
+    return "N/A"
 
 def currency_symbol(code: str) -> str:
     m = {"EUR":"€","USD":"$","GBP":"£","JPY":"¥","CHF":"CHF","CAD":"$","AUD":"$","SEK":"kr","NOK":"kr","DKK":"kr","PLN":"zł","HKD":"$"}
@@ -223,7 +234,7 @@ if ticker:
     price = first_notna(safe_get(info, "currentPrice", None), safe_get(fast, "last_price", None))
     currency = safe_get(info, "currency", "EUR")
     sym = currency_symbol(currency)
-    label_tkr = (safe_get(info, "symbol", None) or ticker).upper()
+    label_tkr = coerce_symbol(info, ticker)
 
     # KPIs (Rohwerte)
     trailing_pe = safe_get(info, "trailingPE", np.nan)
