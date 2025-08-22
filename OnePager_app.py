@@ -287,7 +287,7 @@ if ticker:
         ax.set_ylabel(f"{sym} bn ({currency})", fontsize=6)
         ax.set_title(f"{label_tkr} – {currency}", fontsize=6)
         ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=6)
+        ax.set_xticklabels(names, rotation=9)
         style_axes(ax)
         for rect, v in zip(bars, vals_abs):
             if pd.notna(v):
