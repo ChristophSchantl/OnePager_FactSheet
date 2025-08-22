@@ -281,15 +281,15 @@ if ticker:
         fig, ax = plt.subplots(figsize=(4.6, 2.0))
         x = np.arange(len(names))
         bars = ax.bar(x, vals_abs, color=colors, width=0.6)
-        ax.set_ylabel(f"{sym} bn ({currency})", fontsize=8)
-        ax.set_title(f"{label_tkr} – {currency}", fontsize=10)
+        ax.set_ylabel(f"{sym} bn ({currency})", fontsize=7)
+        ax.set_title(f"{label_tkr} – {currency}", fontsize=8)
         ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=10)
+        ax.set_xticklabels(names, rotation=6)
         style_axes(ax)
         for rect, v in zip(bars, vals_abs):
             if pd.notna(v):
                 ax.text(rect.get_x() + rect.get_width()/2, rect.get_height(),
-                        f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=7.8)
+                        f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=5.8)
         st.pyplot(fig, clear_figure=True)
 
     st.markdown("---")
@@ -348,18 +348,6 @@ if ticker:
 
     st.markdown("---")
 
-    # ---------- Raw data & export ----------
-    st.subheader("Raw data & export")
-    meta_table = pd.DataFrame({
-        "Field": ["Name","Ticker","Exchange","Country","Industry","Sector","Employees",
-                  "Currency","MarketCap (bn)","Shares (bn)","Price"],
-        "Value": [long_name,label_tkr,exch,country,industry,sector,employees,
-                  currency,bn(mktcap),bn(shares),price]
-    })
-    st.dataframe(meta_table, use_container_width=True)
-    st.download_button("Download CSV (meta)",
-        data=meta_table.to_csv(index=False).encode("utf-8"),
-        file_name=f"{label_tkr}_meta.csv", mime="text/csv")
 
 else:
     st.info("Enter a Yahoo ticker, e.g., BMPS.MI.")
