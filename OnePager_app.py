@@ -1,15 +1,5 @@
-# one_pager_app.py
+# onepager_app.py
 # -*- coding: utf-8 -*-
-"""
-SHI - STOCK CHECK : One-Pager (Streamlit)
-- Ticker-Suche via Yahoo-Finance-API (Namenssuche -> Symbol wählen)
-- KPIs mit grüner Hervorhebung nach Regeln:
-    P/E < 10, P/B < 1, Dividend Yield > 5%
-- Tabelle: EV/EBITDA < 10, Profit Margin > 20% grün
-- Balance Sheet: Total Debt/Equity < 50% grün (Prozent oder Ratio robust)
-- Kompakte Charts, kleine Typografie
-"""
-
 from __future__ import annotations
 import math
 from typing import Dict, List, Tuple
@@ -20,12 +10,11 @@ import yfinance as yf
 import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-import requests  # für die Yahoo-Suche
+import requests
 
-# ---------- Streamlit page ----------
+# ---------------------- Streamlit & Theme ----------------------
 st.set_page_config(page_title="One-Pager", layout="wide")
 
-# ---------- Global typography & figure style ----------
 mpl.rcParams.update({
     "font.size": 9,
     "axes.titlesize": 9,
@@ -41,8 +30,6 @@ st.markdown(
     <style>
     .block-container {padding-top:1.2rem; padding-bottom:0.6rem;}
     .page-title {font-size:1.8rem; font-weight:800; margin:1.0rem 0 0.4rem 0; line-height:1.15;}
-
-    /* kleine, kontrollierbare KPI-Komponente */
     .kpi-wrap {margin:0.1rem 0;}
     .kpi-label {font-size:0.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
     .kpi-value {font-size:1.38rem; font-weight:700; color:#111;}
@@ -52,24 +39,33 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------- Helpers ----------
+# ---------------------- Session State ----------------------
+if "ticker" not in st.session_state:
+    st.session_state.ticker = "BMPS.MI"
+if "search_query" not in st.session_state:
+    st.session_state.search_query = ""
+if "search_results" not in st.session_state:
+    st.session_state.search_results = []
+if "search_choice_idx" not in st.session_state:
+    st.session_state.search_choice_idx = 0
+
+# ---------------------- Helpers ----------------------
 def safe_get(d: Dict, key: str, default=np.nan):
+    """dict.get, aber behandelt None/NaN als 'nicht vorhanden'."""
     try:
         v = d.get(key, default)
-        # None oder NaN als "nicht vorhanden" behandeln
         if v is None or (isinstance(v, float) and math.isnan(v)):
             return default
         return v
     except Exception:
         return default
 
-def coerce_symbol(info_dict: Dict, fallback) -> str:
+def coerce_symbol(info_dict: Dict, fallback: str) -> str:
+    """Liefert robust ein Symbol in UPPERCASE (fällt auf Ticker zurück)."""
     s = info_dict.get("symbol") if isinstance(info_dict, dict) else None
     if isinstance(s, str) and s.strip():
         return s.strip().upper()
-    if isinstance(fallback, str) and fallback.strip():
-        return fallback.strip().upper()
-    return "N/A"
+    return (fallback or "N/A").strip().upper()
 
 def currency_symbol(code: str) -> str:
     m = {"EUR":"€","USD":"$","GBP":"£","JPY":"¥","CHF":"CHF","CAD":"$","AUD":"$","SEK":"kr","NOK":"kr","DKK":"kr","PLN":"zł","HKD":"$"}
@@ -126,7 +122,7 @@ def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
                 if ttm > 0: y = float(ttm / price)
         except Exception:
             pass
-    if pd.notna(y) and y > 0.5:  # unrealistisch hoch -> ignoriere
+    if pd.notna(y) and y > 0.5:
         return np.nan
     return y
 
@@ -142,7 +138,6 @@ def style_axes(ax):
     for spine in ax.spines.values(): spine.set_alpha(0.22)
     ax.tick_params(labelsize=7)
 
-# --- kleine KPI-Hilfsfunktion
 def kpi(col, label: str, value_str: str, highlight: bool = False):
     klass = "kpi-value kpi-green" if highlight else "kpi-value"
     col.markdown(
@@ -151,70 +146,75 @@ def kpi(col, label: str, value_str: str, highlight: bool = False):
         unsafe_allow_html=True,
     )
 
-# --- Yahoo-Finanzticker-Suche nach Namen
-def yahoo_symbol_search(query: str, count: int = 15, lang: str = "en-US", region: str = "US"):
-    """
-    Sucht via Yahoo-Endpoint nach Symbolen. Gibt eine Liste von Dicts zurück:
-    {"Symbol","Name","Exchange","Type"}
-    """
-    if not query or not query.strip():
-        return []
-
-    url = "https://query2.finance.yahoo.com/v1/finance/search"
-    params = {"q": query.strip(), "lang": lang, "region": region, "quotesCount": count, "newsCount": 0}
-    headers = {"User-Agent": "Mozilla/5.0"}
-
+def yahoo_search(query: str, quotes_count: int = 20):
+    """Yahoo Finance Autocomplete API (inoffiziell)."""
+    url = "https://query1.finance.yahoo.com/v1/finance/search"
+    params = {"q": query, "quotesCount": quotes_count, "newsCount": 0, "lang": "en-US", "region": "US"}
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=8)
+        r = requests.get(url, params=params, timeout=6)
         r.raise_for_status()
-        data = r.json() or {}
-        quotes = data.get("quotes", []) or []
-        rows = []
-        for q in quotes:
-            symbol = q.get("symbol")
-            name = q.get("shortname") or q.get("longname") or q.get("name") or ""
-            exch  = q.get("exchDisp") or q.get("exchange") or ""
-            qtype = q.get("quoteType") or ""
-            if symbol:
-                rows.append({"Symbol": symbol, "Name": name, "Exchange": exch, "Type": qtype})
-        return rows
+        data = r.json()
+        out = []
+        for q in data.get("quotes", []):
+            sym = q.get("symbol")
+            if not sym:
+                continue
+            out.append({
+                "symbol": sym,
+                "name": q.get("shortname") or q.get("longname") or "",
+                "exch": q.get("exchDisp") or q.get("exchange") or "",
+                "type": q.get("quoteType") or "",
+            })
+        return out
     except Exception:
         return []
 
-# ---------- Sidebar ----------
+# ---------------------- Header & Sidebar ----------------------
 left, right = st.columns([2, 1])
+with left:
+    st.markdown("<h1 class='page-title'>SHI - STOCK CHECK</h1>", unsafe_allow_html=True)
+
 with right:
     st.markdown("<div class='page-title'>Parameters</div>", unsafe_allow_html=True)
-
-    # persistenter Ticker (ändert sich, wenn in Suche Symbol gewählt wird)
-    default_ticker = st.session_state.get("ticker_sel", "BMPS.MI")
-    ticker = st.text_input("Ticker", key="ticker_input", value=default_ticker).strip()
+    # Ticker-Feld ist an Session-State gebunden -> bleibt erhalten
+    st.text_input("Ticker", key="ticker")
     years_window = st.slider("Price window (years)", min_value=1, max_value=10, value=3, step=1)
 
-    st.markdown("---")
-    st.caption("Find Yahoo ticker by name")
-    search_q = st.text_input("Search company / ETF / fund", placeholder="e.g., Monte Paschi, Apple, Siemens")
-    do_search = st.button("Search")
+# ---------------------- Centered Search ----------------------
+c1, c2, c3 = st.columns([1, 2, 1])
+with c2:
+    with st.form("search_form", clear_on_submit=False):
+        st.text_input(
+            "Search company or ticker",
+            key="search_query",
+            placeholder="e.g., LVMH, Apple, Monte dei Paschi…",
+        )
+        submitted = st.form_submit_button("Search")
 
-    if do_search and search_q:
-        results = yahoo_symbol_search(search_q, count=20, lang="en-US", region="US")
-        if results:
-            res_df = pd.DataFrame(results)
-            st.dataframe(res_df, use_container_width=True, hide_index=True)
-            options = [""] + [f"{r['Symbol']} — {r['Name']}" if r["Name"] else r["Symbol"] for r in results]
-            picked = st.selectbox("Use symbol", options=options, index=0, key="symbol_pick")
-            if st.button("Use selected symbol") and picked:
-                sel_symbol = picked.split(" — ")[0]
-                st.session_state["ticker_sel"] = sel_symbol
-                st.success(f"Selected ticker: {sel_symbol}")
-                st.experimental_rerun()
-        else:
-            st.info("No results for your query.")
+    if submitted and st.session_state.search_query.strip():
+        st.session_state.search_results = yahoo_search(st.session_state.search_query.strip())
+        st.session_state.search_choice_idx = 0
 
-with left:
-    st.markdown("<h1 class='page-title'>SHI - STOCK CHECK </h1>", unsafe_allow_html=True)
+    results = st.session_state.search_results
+    if results:
+        labels = [f"{i+1:02d}. {r['symbol']} — {r['name']} ({r['exch']})" for i, r in enumerate(results)]
+        st.session_state.search_choice_idx = st.selectbox(
+            "Select result", options=list(range(len(labels))),
+            format_func=lambda i: labels[i], index=st.session_state.search_choice_idx
+        )
+        colA, colB = st.columns([1, 1])
+        with colA:
+            if st.button("Use selection"):
+                pick = results[st.session_state.search_choice_idx]
+                st.session_state.ticker = pick["symbol"].upper()
+                st.success(f"Ticker set to **{st.session_state.ticker}**")
+        with colB:
+            if st.button("Clear results"):
+                st.session_state.search_results = []
+                st.session_state.search_choice_idx = 0
 
-# ---------- Core ----------
+# ---------------------- Core ----------------------
+ticker = st.session_state.ticker.strip().upper()
 if ticker:
     data = load_ticker_info(ticker)
     tkr: yf.Ticker = data["ticker"]
@@ -236,7 +236,7 @@ if ticker:
     sym = currency_symbol(currency)
     label_tkr = coerce_symbol(info, ticker)
 
-    # KPIs (Rohwerte)
+    # KPIs
     trailing_pe = safe_get(info, "trailingPE", np.nan)
     forward_pe = safe_get(info, "forwardPE", np.nan)
     ps_ttm = safe_get(info, "priceToSalesTrailing12Months", np.nan)
@@ -253,7 +253,7 @@ if ticker:
         try: next_earnings = pd.to_datetime(ed[0]).date().isoformat()
         except Exception: next_earnings = None
 
-    # Financials (annual → quarterly fallback)
+    # Financials
     try: fin_a = tkr.financials
     except Exception: fin_a = pd.DataFrame()
     try: fin_q = tkr.quarterly_financials
@@ -268,12 +268,8 @@ if ticker:
 
     if pd.isna(gross_profit) and pd.notna(revenue) and pd.notna(cost_rev):
         gross_profit = revenue - cost_rev
-    if pd.notna(op_ex) and pd.notna(cost_rev):
-        other_expenses = max(0.0, op_ex - cost_rev)
-    else:
-        other_expenses = op_ex
 
-    # ---------- Header & Meta ----------
+    # ------------------ Header & Meta ------------------
     meta_col1, meta_col2, meta_col3 = st.columns([1.4, 1.1, 1.2])
     with meta_col1:
         st.subheader(long_name)
@@ -296,9 +292,8 @@ if ticker:
 
     st.markdown("---")
 
-    # ---------- KPI Block (mit Grün-Logik) ----------
+    # ------------------ KPI Row mit Grün-Logik ------------------
     k1, k2, k3, k4, k5 = st.columns(5)
-
     pe_ok  = pd.notna(trailing_pe) and trailing_pe < 10
     pb_ok  = pd.notna(pb)          and pb < 1
     dy_ok  = pd.notna(dividend_yield) and dividend_yield > 0.05
@@ -311,7 +306,7 @@ if ticker:
 
     st.markdown("---")
 
-    # ---------- Two charts side by side ----------
+    # ------------------ Charts ------------------
     ch_left, ch_right = st.columns(2)
 
     with ch_left:
@@ -335,8 +330,7 @@ if ticker:
 
     with ch_right:
         st.caption("Earnings & Revenue (last period)")
-        # ohne Other Expenses
-        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]
+        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]  # ohne Other Expenses
         gross_val = gross_profit if pd.notna(gross_profit) else (
             revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan
         )
@@ -359,7 +353,7 @@ if ticker:
 
     st.markdown("---")
 
-    # ---------- Valuation & Profitability ----------
+    # ------------------ Valuation & Profitability ------------------
     st.subheader("Valuation & Profitability")
 
     ev         = safe_get(info, "enterpriseValue", np.nan)
@@ -399,11 +393,11 @@ if ticker:
 
     st.markdown("---")
 
-    # ---------- Balance Sheet & Cash Flow ----------
+    # ------------------ Balance Sheet & Cash Flow ------------------
     st.subheader("Balance Sheet & Cash Flow")
 
     total_cash = safe_get(info, "totalCash", np.nan)     # mrq
-    d_to_e     = safe_get(info, "debtToEquity", np.nan)  # mrq (oft Prozent)
+    d_to_e     = safe_get(info, "debtToEquity", np.nan)  # mrq (oft in %)
     lfcf       = safe_get(info, "leveredFreeCashflow", np.nan)
 
     def style_bs_rows(row):
