@@ -16,13 +16,13 @@ st.set_page_config(page_title="BMPS – One-Pager", layout="wide")
 
 # ---------- Global typography & figure style ----------
 mpl.rcParams.update({
-    "font.size": 9,
-    "axes.titlesize": 11,
-    "axes.labelsize": 9,
-    "xtick.labelsize": 8,
-    "ytick.labelsize": 8,
-    "legend.fontsize": 8,
-    "figure.dpi": 120,
+    "font.size": 8,
+    "axes.titlesize": 9,
+    "axes.labelsize": 7,
+    "xtick.labelsize": 6,
+    "ytick.labelsize": 6,
+    "legend.fontsize": 6,
+    "figure.dpi": 100,
 })
 
 st.markdown(
