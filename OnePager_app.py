@@ -1,3 +1,15 @@
+# one_pager_app.py
+# -*- coding: utf-8 -*-
+"""
+SHI - STOCK CHECK : One-Pager (Streamlit)
+- Ticker-Suche via Yahoo-Finance-API (Namenssuche -> Symbol wählen)
+- KPIs mit grüner Hervorhebung nach Regeln:
+    P/E < 10, P/B < 1, Dividend Yield > 5%
+- Tabelle: EV/EBITDA < 10, Profit Margin > 20% grün
+- Balance Sheet: Total Debt/Equity < 50% grün (Prozent oder Ratio robust)
+- Kompakte Charts, kleine Typografie
+"""
+
 from __future__ import annotations
 import math
 from typing import Dict, List, Tuple
@@ -8,6 +20,7 @@ import yfinance as yf
 import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+import requests  # für die Yahoo-Suche
 
 # ---------- Streamlit page ----------
 st.set_page_config(page_title="One-Pager", layout="wide")
@@ -27,15 +40,13 @@ st.markdown(
     """
     <style>
     .block-container {padding-top:1.2rem; padding-bottom:0.6rem;}
-    [data-testid="stMetricValue"] {font-size:1.38rem; font-weight:700;}
-    [data-testid="stMetricLabel"] {font-size:0.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
     .page-title {font-size:1.8rem; font-weight:800; margin:1.0rem 0 0.4rem 0; line-height:1.15;}
 
-    /* NEW: kleine, kontrollierbare KPI-Komponente */
+    /* kleine, kontrollierbare KPI-Komponente */
     .kpi-wrap {margin:0.1rem 0;}
     .kpi-label {font-size:0.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
     .kpi-value {font-size:1.38rem; font-weight:700; color:#111;}
-    .kpi-green {color:#16a34a !important;} /* Tailwind-ähnliches Grün (#16a34a) */
+    .kpi-green {color:#16a34a !important;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -120,7 +131,7 @@ def style_axes(ax):
     for spine in ax.spines.values(): spine.set_alpha(0.22)
     ax.tick_params(labelsize=7)
 
-# NEW: kleine KPI-Hilfsfunktion (kann farblich gehighlightet werden)
+# --- kleine KPI-Hilfsfunktion
 def kpi(col, label: str, value_str: str, highlight: bool = False):
     klass = "kpi-value kpi-green" if highlight else "kpi-value"
     col.markdown(
@@ -129,12 +140,65 @@ def kpi(col, label: str, value_str: str, highlight: bool = False):
         unsafe_allow_html=True,
     )
 
+# --- Yahoo-Finanzticker-Suche nach Namen
+def yahoo_symbol_search(query: str, count: int = 15, lang: str = "en-US", region: str = "US"):
+    """
+    Sucht via Yahoo-Endpoint nach Symbolen. Gibt eine Liste von Dicts zurück:
+    {"Symbol","Name","Exchange","Type"}
+    """
+    if not query or not query.strip():
+        return []
+
+    url = "https://query2.finance.yahoo.com/v1/finance/search"
+    params = {"q": query.strip(), "lang": lang, "region": region, "quotesCount": count, "newsCount": 0}
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=8)
+        r.raise_for_status()
+        data = r.json() or {}
+        quotes = data.get("quotes", []) or []
+        rows = []
+        for q in quotes:
+            symbol = q.get("symbol")
+            name = q.get("shortname") or q.get("longname") or q.get("name") or ""
+            exch  = q.get("exchDisp") or q.get("exchange") or ""
+            qtype = q.get("quoteType") or ""
+            if symbol:
+                rows.append({"Symbol": symbol, "Name": name, "Exchange": exch, "Type": qtype})
+        return rows
+    except Exception:
+        return []
+
 # ---------- Sidebar ----------
 left, right = st.columns([2, 1])
 with right:
     st.markdown("<div class='page-title'>Parameters</div>", unsafe_allow_html=True)
-    ticker = st.text_input("Ticker", value="BMPS.MI").strip()
+
+    # persistenter Ticker (ändert sich, wenn in Suche Symbol gewählt wird)
+    default_ticker = st.session_state.get("ticker_sel", "BMPS.MI")
+    ticker = st.text_input("Ticker", key="ticker_input", value=default_ticker).strip()
     years_window = st.slider("Price window (years)", min_value=1, max_value=10, value=3, step=1)
+
+    st.markdown("---")
+    st.caption("Find Yahoo ticker by name")
+    search_q = st.text_input("Search company / ETF / fund", placeholder="e.g., Monte Paschi, Apple, Siemens")
+    do_search = st.button("Search")
+
+    if do_search and search_q:
+        results = yahoo_symbol_search(search_q, count=20, lang="en-US", region="US")
+        if results:
+            res_df = pd.DataFrame(results)
+            st.dataframe(res_df, use_container_width=True, hide_index=True)
+            options = [""] + [f"{r['Symbol']} — {r['Name']}" if r["Name"] else r["Symbol"] for r in results]
+            picked = st.selectbox("Use symbol", options=options, index=0, key="symbol_pick")
+            if st.button("Use selected symbol") and picked:
+                sel_symbol = picked.split(" — ")[0]
+                st.session_state["ticker_sel"] = sel_symbol
+                st.success(f"Selected ticker: {sel_symbol}")
+                st.experimental_rerun()
+        else:
+            st.info("No results for your query.")
 
 with left:
     st.markdown("<h1 class='page-title'>SHI - STOCK CHECK </h1>", unsafe_allow_html=True)
@@ -224,13 +288,12 @@ if ticker:
     # ---------- KPI Block (mit Grün-Logik) ----------
     k1, k2, k3, k4, k5 = st.columns(5)
 
-    # Bedingungen:
     pe_ok  = pd.notna(trailing_pe) and trailing_pe < 10
     pb_ok  = pd.notna(pb)          and pb < 1
     dy_ok  = pd.notna(dividend_yield) and dividend_yield > 0.05
 
     kpi(k1, "P/E RATIO", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a", pe_ok)
-    kpi(k2, "P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a", False)  # keine Regel
+    kpi(k2, "P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a", False)
     kpi(k3, "P/B", f"{pb:.2f}" if pd.notna(pb) else "n/a", pb_ok)
     kpi(k4, "DIVIDEND YIELD", fmt_pct(dividend_yield), dy_ok)
     kpi(k5, "PAYOUT RATIO", fmt_pct(payout_ratio), False)
@@ -261,7 +324,8 @@ if ticker:
 
     with ch_right:
         st.caption("Earnings & Revenue (last period)")
-        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]  # ohne Other Expenses
+        # ohne Other Expenses
+        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]
         gross_val = gross_profit if pd.notna(gross_profit) else (
             revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan
         )
@@ -298,7 +362,6 @@ if ticker:
     revenue_ttm = safe_get(info, "totalRevenue", np.nan)
     nic_ttm     = safe_get(info, "netIncomeToCommon", np.nan)
 
-    # NEW: Styling-Regeln für Tabelle
     GREEN = 'color: #16a34a; font-weight:700;'
     def style_val_rows(row):
         m = row["Metric"]
@@ -321,8 +384,6 @@ if ticker:
         ("Net Income to Common (ttm)",  fmt_money_bn(nic_ttm,     currency)),
     ]
     val_df = pd.DataFrame(val_rows, columns=["Metric", "Value"])
-
-    # Achtung: st.table bewahrt Styler-Farben zuverlässiger als st.dataframe
     st.table(val_df.style.apply(style_val_rows, axis=1))
 
     st.markdown("---")
@@ -331,13 +392,11 @@ if ticker:
     st.subheader("Balance Sheet & Cash Flow")
 
     total_cash = safe_get(info, "totalCash", np.nan)     # mrq
-    d_to_e     = safe_get(info, "debtToEquity", np.nan)  # mrq (in % bei Yahoo)
+    d_to_e     = safe_get(info, "debtToEquity", np.nan)  # mrq (oft Prozent)
     lfcf       = safe_get(info, "leveredFreeCashflow", np.nan)
 
-    # Regel: Total Debt/Equity < 50%
     def style_bs_rows(row):
         if row["Metric"] == "Total Debt/Equity (mrq)" and pd.notna(d_to_e):
-            # Yahoo liefert oft Prozent (z.B. 34.5) – akzeptiere beides:
             val = float(d_to_e)
             cond = (val < 50) if val > 1 else (val < 0.50)
             if cond: return [GREEN, GREEN]
