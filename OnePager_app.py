@@ -153,26 +153,57 @@ def kpi(col, label: str, value_str: str, highlight: bool = False):
     )
 
 # ---------- Yahoo symbol search ----------
-def yahoo_symbol_search(query: str, limit: int = 10) -> List[Dict]:
-    """Nutze die inoffizielle Yahoo-Finance-Suche."""
-    url = "https://query2.finance.yahoo.com/v1/finance/search"
-    params = {"q": query, "quotesCount": limit, "newsCount": 0}
+def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
+    """Yahoo-Suche mit UA-Header + Fallback-Endpoint."""
+    if not query:
+        return []
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        )
+    }
+
+    # 1) Haupt-Endpoint
     try:
-        r = requests.get(url, params=params, timeout=6)
+        url = "https://query2.finance.yahoo.com/v1/finance/search"
+        params = {"q": query, "quotesCount": limit, "newsCount": 0, "listsCount": 0}
+        r = requests.get(url, params=params, headers=headers, timeout=8)
         r.raise_for_status()
-        js = r.json()
-        quotes = js.get("quotes", []) or []
-        # Behalte nur echte Symbole
+        quotes = (r.json() or {}).get("quotes", []) or []
         out = []
         for q in quotes:
-            sym = q.get("symbol")
+            sym  = q.get("symbol")
             name = q.get("shortname") or q.get("longname") or q.get("name") or ""
             exch = q.get("exchDisp") or q.get("exchange") or ""
             if sym and name:
                 out.append({"symbol": sym, "name": name, "exchange": exch})
-        return out
+        if out:
+            return out[:limit]
     except Exception:
-        return []
+        pass
+
+    # 2) Fallback-Endpoint (autoc)
+    try:
+        url = "https://autoc.finance.yahoo.com/autoc"
+        params = {"query": query, "region": 1, "lang": "en"}
+        r = requests.get(url, params=params, headers=headers, timeout=8)
+        r.raise_for_status()
+        results = ((r.json() or {}).get("ResultSet", {}) or {}).get("Result", []) or []
+        out = []
+        for e in results:
+            sym  = e.get("symbol")
+            name = e.get("name")
+            exch = e.get("exchDisp") or e.get("exch") or ""
+            if sym and name:
+                out.append({"symbol": sym, "name": name, "exchange": exch})
+        return out[:limit]
+    except Exception:
+        pass
+
+    return []
+
 
 # ---------- Layout: zwei Spalten ----------
 left, right = st.columns([2, 1])
@@ -194,24 +225,34 @@ with right:
 with left:
     st.markdown("<h1 class='page-title'>SHI - STOCK CHECK</h1>", unsafe_allow_html=True)
 
-    st.text_input("Search company or ticker", key="search_query", placeholder="e.g. Microsoft or MSFT")
-    search_col1, search_col2 = st.columns([0.2, 0.8])
-    with search_col1:
-        if st.button("Search"):
-            q = (st.session_state.search_query or "").strip()
-            st.session_state.search_results = yahoo_symbol_search(q) if q else []
+    # Sucheingabe + Button
+    query = st.text_input("Search company or ticker", key="search_query", placeholder="e.g. Microsoft or MSFT")
+    if st.button("Search"):
+        st.session_state.search_results = yahoo_symbol_search(query)
 
-    # Ergebnisse anzeigen, Auswahl übernehmen
+    # Ergebnisse anzeigen
     results = st.session_state.search_results
     if results:
-        # schöne Darstellung und Auswahl
-        labels = [f"{r['name']}  ({r['symbol']}) — {r['exchange']}" for r in results]
-        idx = st.selectbox("Matches", options=list(range(len(results))),
-                           format_func=lambda i: labels[i], key="search_select")
+        # Tabelle als Überblick
+        st.dataframe(
+            pd.DataFrame(results)[["symbol", "name", "exchange"]],
+            use_container_width=True, hide_index=True
+        )
+
+        # Auswahl + Übernehmen
+        labels = [f"{r['symbol']} — {r['name']} ({r['exchange']})" for r in results]
+        pick = st.selectbox("Pick one", options=list(range(len(results))),
+                            format_func=lambda i: labels[i], key="search_pick")
         if st.button("Use selection"):
-            sym = results[idx]["symbol"]
-            st.session_state.ticker = sym
-            st.session_state.ticker_input = sym  # spiegelt in das rechte Textfeld
+            chosen = results[pick]
+            st.session_state.ticker = chosen["symbol"]
+            st.session_state.ticker_input = chosen["symbol"]  # spiegelt rechts ins Ticker-Feld
+            st.success(f"Using {chosen['symbol']}")
+    else:
+        # Nur wenn ein Suchversuch stattgefunden hat und nichts kam, Hinweis zeigen
+        if st.session_state.get("search_query"):
+            st.info("No results yet. Try a different term (or check network/headers).")
+
 
 # ---------- Core ----------
 ticker = st.session_state.ticker
