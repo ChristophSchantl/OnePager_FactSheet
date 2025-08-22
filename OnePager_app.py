@@ -1,4 +1,5 @@
-
+# bmps_onepager_streamlit.py
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 import math
 from typing import Dict, List, Tuple
@@ -27,10 +28,15 @@ mpl.rcParams.update({
 st.markdown(
     """
     <style>
-    .block-container {padding-top:0.5rem; padding-bottom:0.5rem;}
-    /* Emphasize KPI row */
+    /* etwas mehr Abstand nach oben; Titel weiter unten */
+    .block-container {padding-top:1.2rem; padding-bottom:0.6rem;}
+
+    /* schlanke KPI-Zeile */
     [data-testid="stMetricValue"] {font-size:1.38rem; font-weight:700;}
     [data-testid="stMetricLabel"] {font-size:0.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
+
+    /* eigene Titel-Klasse, kleiner und etwas distanziert */
+    .page-title {font-size:1.8rem; font-weight:800; margin:1.0rem 0 0.4rem 0; line-height:1.15;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -134,12 +140,12 @@ def style_axes(ax):
 # ---------- Sidebar ----------
 left, right = st.columns([2, 1])
 with right:
-    st.header("Parameters")
+    st.markdown("<div class='page-title'>Parameters</div>", unsafe_allow_html=True)
     ticker = st.text_input("Ticker", value="BMPS.MI").strip()
     years_window = st.slider("Price window (years)", min_value=1, max_value=10, value=3, step=1)
 
 with left:
-    st.title("SHI Management – STOCK PROFILE: One-Pager")
+    st.markdown("<h1 class='page-title'>SHI Management – STOCK PROFILE: One-Pager</h1>", unsafe_allow_html=True)
 
 # ---------- Core ----------
 if ticker:
@@ -231,32 +237,33 @@ if ticker:
 
     # ---------- KPI Block ----------
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("P/E Ratio", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a")
+    k1.metric("P/E RATIO", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a")
     k2.metric("P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a")
     k3.metric("P/B", f"{pb:.2f}" if pd.notna(pb) else "n/a")
-    k4.metric("Dividend Yield", fmt_pct(dividend_yield))
-    k5.metric("Payout Ratio", fmt_pct(payout_ratio))
+    k4.metric("DIVIDEND YIELD", fmt_pct(dividend_yield))
+    k5.metric("PAYOUT RATIO", fmt_pct(payout_ratio))
 
-    # ---------- P/E Donut (small, no right-side label) ----------
+    # ---------- P/E Donut (HALF SIZE, no right-side label) ----------
     st.markdown("---")
-    donut_l, _spacer = st.columns([0.9, 1.1])  # rechts nur Spacer
+    donut_l, _spacer = st.columns([0.8, 1.2])  # rechts nur Spacer
 
     with donut_l:
         nic_ttm = safe_get(info, "netIncomeToCommon", np.nan)
         earnings = nic_ttm
         mc = mktcap
         if pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0:
-            figd, axd = plt.subplots(figsize=(2.8, 1.6))  # klein
+            # vorher ~ (2.8, 1.6) -> jetzt etwa halb so groß
+            figd, axd = plt.subplots(figsize=(1.4, 0.8))
             sizes = [earnings, max(mc - earnings, 0.0)]
-            axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.22))
+            axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.18))
             axd.set_aspect("equal")
 
             earn_lbl = f"{sym}{bn(earnings):.2f}b"
             mc_lbl   = f"{sym}{bn(mc):.2f}b"
-            axd.text(-0.75, 0.52, f"Earnings\n{earn_lbl}", fontsize=7.5, ha="left",  va="center")
-            axd.text( 0.00, -0.04, f"Market Cap\n{mc_lbl}", fontsize=7.5, ha="center", va="center")
+            axd.text(-0.52, 0.40, f"Earnings\n{earn_lbl}", fontsize=6.3, ha="left",  va="center")
+            axd.text( 0.00, -0.03, f"Market Cap\n{mc_lbl}", fontsize=6.3, ha="center", va="center")
 
-            figd.tight_layout(pad=0.4)
+            figd.tight_layout(pad=0.2)
             st.pyplot(figd, clear_figure=True)
         else:
             st.caption("P/E donut unavailable (missing market cap or earnings).")
@@ -273,7 +280,7 @@ if ticker:
             hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
             if isinstance(hist, pd.DataFrame) and not hist.empty:
                 series = hist["Close"].dropna()
-                figp, axp = plt.subplots(figsize=(4.8, 2.2))
+                figp, axp = plt.subplots(figsize=(4.6, 2.0))
                 axp.plot(series.index, series.values, linewidth=0.8)
                 axp.set_title(f"{label_tkr} – {years_window}y", fontsize=10)
                 axp.set_xlabel("Date", fontsize=8)
@@ -293,9 +300,9 @@ if ticker:
             revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan
         )
         vals_abs = [bn(revenue), bn(cost_rev), bn(gross_val), bn(other_expenses), bn(net_income)]
-        colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#b04a4a", "#17becf"]  # blue, red, green, red, teal
+        colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#b04a4a", "#17becf"]
 
-        fig, ax = plt.subplots(figsize=(4.8, 2.2))
+        fig, ax = plt.subplots(figsize=(4.6, 2.0))
         x = np.arange(len(names))
         bars = ax.bar(x, vals_abs, color=colors, width=0.6)
         ax.set_ylabel(f"{sym} bn ({currency})", fontsize=8)
@@ -306,7 +313,7 @@ if ticker:
         for rect, v in zip(bars, vals_abs):
             if pd.notna(v):
                 ax.text(rect.get_x() + rect.get_width()/2, rect.get_height(),
-                        f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=8)
+                        f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=7.8)
         st.pyplot(fig, clear_figure=True)
 
     st.markdown("---")
