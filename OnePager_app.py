@@ -282,9 +282,9 @@ if ticker:
                 series = hist["Close"].dropna()
                 figp, axp = plt.subplots(figsize=(4.6, 2.0))
                 axp.plot(series.index, series.values, linewidth=0.8)
-                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=10)
-                axp.set_xlabel("Date", fontsize=8)
-                axp.set_ylabel(f"Price ({currency})", fontsize=8)
+                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=9)
+                axp.set_xlabel("Date", fontsize=7)
+                axp.set_ylabel(f"Price ({currency})", fontsize=7)
                 style_axes(axp)
                 st.pyplot(figp, clear_figure=True)
             else:
