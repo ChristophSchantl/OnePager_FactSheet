@@ -259,10 +259,10 @@ if ticker:
                 figp, axp = plt.subplots(figsize=(4.6, 2.0))
                 axp.plot(series.index, series.values, linewidth=0.7)
                 
-                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=9)        # vorher 10
-                axp.set_xlabel("Date", fontsize=7)                                  # vorher 8
-                axp.set_ylabel(f"Price ({currency})", fontsize=7)                   # vorher 8
-                axp.tick_params(axis="both", labelsize=7)                           # Ticks kleiner
+                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=8)        # vorher 10
+                axp.set_xlabel("Date", fontsize=5)                                  # vorher 8
+                axp.set_ylabel(f"Price ({currency})", fontsize=5)                   # vorher 8
+                axp.tick_params(axis="both", labelsize=5)                           # Ticks kleiner
                 style_axes(axp)
 
                 st.pyplot(figp, clear_figure=True)
