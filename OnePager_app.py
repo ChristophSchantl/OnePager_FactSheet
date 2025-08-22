@@ -7,7 +7,7 @@ Banca Monte dei Paschi di Siena (BMPS) – One-Pager (Streamlit)
 Korrekturen & Add-ons:
 - Feld "Founded" entfernt
 - Dividend Yield robust normalisiert (0–1 oder 0–100) + TTM-Fallback aus Dividendenhistorie
-- 3‑Jahres Kurschart (flexibel einstellbare Jahre, 1–10) mit Adjusted Close
+- 3‑Jahres Kurschart (flexibel einstellbare Jahre, 1–10) mit Close
 - Saubere Anzeige/Abfang fehlender EU‑Holderdaten
 
 Start:
@@ -231,14 +231,14 @@ if ticker:
     # ----------------------------------
     # Price Chart – flexibel (Jahre 1..10)
     # ----------------------------------
-    st.subheader("Preisverlauf (Adjusted Close)")
+    st.subheader("Preisverlauf (Close)")
     try:
         hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
         if isinstance(hist, pd.DataFrame) and not hist.empty:
             series = hist["Adj Close"].dropna()
             figp, axp = plt.subplots(figsize=(10, 4))
             axp.plot(series.index, series.values)
-            axp.set_title(f"{ticker} – {years_window}J Adjusted Close")
+            axp.set_title(f"{ticker} – {years_window}J Close")
             axp.set_xlabel("Datum")
             axp.set_ylabel(f"Preis ({currency})")
             axp.grid(True, linestyle=":", alpha=0.4)
