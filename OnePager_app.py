@@ -26,10 +26,10 @@ mpl.rcParams.update({
 st.markdown(
     """
     <style>
-    .block-container {padding-top:0.6rem; padding-bottom:0.6rem;}
-    [data-testid="stMetricValue"] {font-size:1.12rem;}
-    [data-testid="stMetricLabel"] {font-size:0.74rem; color:#666;}
-    h1, h2, h3 {letter-spacing:0.2px}
+    .block-container {padding-top:0.5rem; padding-bottom:0.5rem;}
+    /* Emphasize KPI row */
+    [data-testid="stMetricValue"] {font-size:1.38rem; font-weight:700;}
+    [data-testid="stMetricLabel"] {font-size:0.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -240,37 +240,42 @@ if ticker:
 
     # ---------- P/E Donut ----------
     st.markdown("---")
-    donut_l, donut_r = st.columns([1, 1])
-
+    donut_l, donut_r = st.columns([0.9, 1.1])  # kleiner Chart links, großer Wert rechts
+    
     with donut_l:
-        # use TTM net income from info for consistency with market cap
         nic_ttm = safe_get(info, "netIncomeToCommon", np.nan)
         earnings = nic_ttm
         mc = mktcap
         if pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0:
-            figd, axd = plt.subplots(figsize=(4.6, 2.2))
+            figd, axd = plt.subplots(figsize=(2.8, 1.6))  # <<< deutlich kleiner
             sizes = [earnings, max(mc - earnings, 0.0)]
-            axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.28))
+            axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.22))  # schmalerer Ring
             axd.set_aspect("equal")
-
+    
             earn_lbl = f"{sym}{bn(earnings):.2f}b" if pd.notna(earnings) else "n/a"
             mc_lbl   = f"{sym}{bn(mc):.2f}b"       if pd.notna(mc)       else "n/a"
-
-            # IMPORTANT: use \n for line breaks inside a single string literal
-            axd.text(-1.05, 0.62, f"Earnings\n{earn_lbl}", fontsize=8.5, ha="left",  va="center")
-            axd.text( 0.00, -0.06, f"Market Cap\n{mc_lbl}", fontsize=8.5, ha="center", va="center")
+    
+            # kompaktere Beschriftung
+            axd.text(-0.75, 0.52, f"Earnings\n{earn_lbl}", fontsize=7.5, ha="left",  va="center")
+            axd.text( 0.00, -0.04, f"Market Cap\n{mc_lbl}", fontsize=7.5, ha="center", va="center")
+    
+            figd.tight_layout(pad=0.4)
             st.pyplot(figd, clear_figure=True)
         else:
             st.caption("P/E donut unavailable (missing market cap or earnings).")
-
+    
     with donut_r:
         if pd.notna(trailing_pe):
-            st.markdown(f"<div style='font-size:36px;font-weight:700;line-height:1'>{trailing_pe:.1f}x</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:42px;font-weight:800;line-height:1'>{trailing_pe:.1f}x</div>",
+                unsafe_allow_html=True,
+            )
             st.markdown("<div style='font-size:12px;color:#666'>PE Ratio</div>", unsafe_allow_html=True)
         else:
             st.caption("PE Ratio: n/a")
-
-    st.markdown("---")
+    
+    
+        st.markdown("---")
 
     # ---------- Two charts side by side ----------
     ch_left, ch_right = st.columns(2)
