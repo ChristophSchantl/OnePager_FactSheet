@@ -243,50 +243,7 @@ if ticker:
     k4.metric("DIVIDEND YIELD", fmt_pct(dividend_yield))
     k5.metric("PAYOUT RATIO", fmt_pct(payout_ratio))
 
-    # ---------- P/E Donut (tiny, outside earnings label) ----------
-    st.markdown("---")
-    donut_l, _spacer = st.columns([0.8, 1.2])  # rechts nur Spacer
     
-    with donut_l:
-        nic_ttm = safe_get(info, "netIncomeToCommon", np.nan)
-        earnings = nic_ttm
-        mc = mktcap
-    
-        if (pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0):
-            # sehr klein & dünner Ring
-            figd, axd = plt.subplots(figsize=(0.6, 0.45))
-            wedges = axd.pie(
-                [earnings, max(mc - earnings, 0.0)],
-                startangle=90,
-                wedgeprops=dict(width=0.10),
-                colors=["#1f77b4", "#ff7f0e"]
-            )[0]
-            axd.set_aspect("equal")
-    
-            # zentrales Label: Market Cap (klein & fett)
-            axd.text(
-                0, 0, f"Market Cap\n{sym}{bn(mc):.2f}b",
-                ha="center", va="center", fontsize=3.5, weight=600
-            )
-    
-            # Earnings als Annotation außerhalb, mit feinem Pfeil
-            w = wedges[0]  # Earnings-Wedge
-            ang = 0.5 * (w.theta2 + w.theta1)
-            x, y = np.cos(np.deg2rad(ang)), np.sin(np.deg2rad(ang))
-            axd.annotate(
-                f"Earnings\n{sym}{bn(earnings):.2f}b",
-                xy=(x * 0.90, y * 0.90), xycoords="data",
-                xytext=(x * 1.18, y * 1.18), textcoords="data",
-                ha="center", va="center", fontsize=3.5,
-                arrowprops=dict(arrowstyle="-", lw=0.6, color="0.4")
-            )
-    
-            figd.tight_layout(pad=0.10)
-            st.pyplot(figd, clear_figure=True)
-        else:
-            st.caption("P/E donut unavailable (missing market cap or earnings).")
-    
-   
     st.markdown("---")
 
     # ---------- Two charts side by side ----------
