@@ -283,9 +283,9 @@ if ticker:
 
         fig, ax = plt.subplots(figsize=(4.6, 2.0))
         x = np.arange(len(names))
-        bars = ax.bar(x, vals_abs, color=colors, width=0.6)
+        bars = ax.bar(x, vals_abs, color=colors, width=0.8)
         ax.set_ylabel(f"{sym} bn ({currency})", fontsize=6)
-        ax.set_title(f"{label_tkr} – {currency}", fontsize=7)
+        ax.set_title(f"{label_tkr} – {currency}", fontsize=6)
         ax.set_xticks(x)
         ax.set_xticklabels(names, rotation=6)
         style_axes(ax)
