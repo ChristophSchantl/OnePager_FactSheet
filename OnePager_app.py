@@ -26,15 +26,16 @@ mpl.rcParams.update({
 st.markdown(
     """
     <style>
-    /* etwas mehr Abstand nach oben; Titel weiter unten */
     .block-container {padding-top:1.2rem; padding-bottom:0.6rem;}
-
-    /* schlanke KPI-Zeile */
     [data-testid="stMetricValue"] {font-size:1.38rem; font-weight:700;}
     [data-testid="stMetricLabel"] {font-size:0.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
-
-    /* eigene Titel-Klasse, kleiner und etwas distanziert */
     .page-title {font-size:1.8rem; font-weight:800; margin:1.0rem 0 0.4rem 0; line-height:1.15;}
+
+    /* NEW: kleine, kontrollierbare KPI-Komponente */
+    .kpi-wrap {margin:0.1rem 0;}
+    .kpi-label {font-size:0.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
+    .kpi-value {font-size:1.38rem; font-weight:700; color:#111;}
+    .kpi-green {color:#16a34a !important;} /* Tailwind-ähnliches Grün (#16a34a) */
     </style>
     """,
     unsafe_allow_html=True,
@@ -49,25 +50,17 @@ def safe_get(d: Dict, key: str, default=np.nan):
         return default
 
 def currency_symbol(code: str) -> str:
-    m = {
-        "EUR": "€", "USD": "$", "GBP": "£", "JPY": "¥", "CHF": "CHF", "CAD": "$",
-        "AUD": "$", "SEK": "kr", "NOK": "kr", "DKK": "kr", "PLN": "zł", "HKD": "$",
-    }
+    m = {"EUR":"€","USD":"$","GBP":"£","JPY":"¥","CHF":"CHF","CAD":"$","AUD":"$","SEK":"kr","NOK":"kr","DKK":"kr","PLN":"zł","HKD":"$"}
     return m.get(str(code).upper(), str(code))
 
 def bn(x: float) -> float:
     return float(x) / 1e9 if pd.notna(x) else np.nan
 
 def normalize_percent_robust(x: float) -> float:
-    """Normalize 10.58/1058 style inputs to fraction 0..1."""
-    if pd.isna(x):
-        return np.nan
-    try:
-        y = float(x)
-    except Exception:
-        return np.nan
-    while y > 1.0:
-        y /= 100.0
+    if pd.isna(x): return np.nan
+    try: y = float(x)
+    except Exception: return np.nan
+    while y > 1.0: y /= 100.0
     return np.nan if y < 0 else y
 
 def first_notna(*vals):
@@ -77,30 +70,24 @@ def first_notna(*vals):
     return np.nan
 
 def get_income_value(df: pd.DataFrame, candidates: List[str]) -> float:
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        return np.nan
+    if not isinstance(df, pd.DataFrame) or df.empty: return np.nan
     idx_map = {i.lower(): i for i in df.index}
     for c in candidates:
         key = c.lower()
         if key in idx_map:
             ser = df.loc[idx_map[key]]
-            try:
-                return float(ser.dropna().iloc[0])
-            except Exception:
-                continue
+            try: return float(ser.dropna().iloc[0])
+            except Exception: continue
     return np.nan
 
 def load_ticker_info(ticker: str) -> Dict:
     t = yf.Ticker(ticker)
-    try:
-        info = t.info or {}
-    except Exception:
-        info = {}
+    try: info = t.info or {}
+    except Exception: info = {}
     fast = getattr(t, "fast_info", {}) or {}
     return {"ticker": t, "info": info, "fast": fast}
 
 def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
-    """Yield (0..1): info -> rate/price -> TTM fallback; clamp absurd values."""
     y0 = normalize_percent_robust(safe_get(info, "dividendYield", np.nan))
     y1 = normalize_percent_robust(safe_get(info, "trailingAnnualDividendYield", np.nan))
     rate = safe_get(info, "trailingAnnualDividendRate", np.nan)
@@ -114,11 +101,10 @@ def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
             if isinstance(div, pd.Series) and not div.empty:
                 last_date = div.index.max()
                 ttm = div[div.index >= last_date - pd.DateOffset(years=1)].sum()
-                if ttm > 0:
-                    y = float(ttm / price)
+                if ttm > 0: y = float(ttm / price)
         except Exception:
             pass
-    if pd.notna(y) and y > 0.5:
+    if pd.notna(y) and y > 0.5:  # unrealistisch hoch -> ignoriere
         return np.nan
     return y
 
@@ -131,9 +117,17 @@ def fmt_money_bn(x: float, code: str) -> str:
 
 def style_axes(ax):
     ax.grid(True, linestyle=":", alpha=0.22)
-    for spine in ax.spines.values():
-        spine.set_alpha(0.22)
+    for spine in ax.spines.values(): spine.set_alpha(0.22)
     ax.tick_params(labelsize=7)
+
+# NEW: kleine KPI-Hilfsfunktion (kann farblich gehighlightet werden)
+def kpi(col, label: str, value_str: str, highlight: bool = False):
+    klass = "kpi-value kpi-green" if highlight else "kpi-value"
+    col.markdown(
+        f"<div class='kpi-wrap'><div class='kpi-label'>{label}</div>"
+        f"<div class='{klass}'>{value_str}</div></div>",
+        unsafe_allow_html=True,
+    )
 
 # ---------- Sidebar ----------
 left, right = st.columns([2, 1])
@@ -167,7 +161,7 @@ if ticker:
     sym = currency_symbol(currency)
     label_tkr = (safe_get(info, "symbol", None) or ticker).upper()
 
-    # KPIs
+    # KPIs (Rohwerte)
     trailing_pe = safe_get(info, "trailingPE", np.nan)
     forward_pe = safe_get(info, "forwardPE", np.nan)
     ps_ttm = safe_get(info, "priceToSalesTrailing12Months", np.nan)
@@ -181,20 +175,14 @@ if ticker:
     ed = safe_get(info, "earningsDate", [])
     next_earnings = None
     if isinstance(ed, (list, tuple)) and len(ed) > 0:
-        try:
-            next_earnings = pd.to_datetime(ed[0]).date().isoformat()
-        except Exception:
-            next_earnings = None
+        try: next_earnings = pd.to_datetime(ed[0]).date().isoformat()
+        except Exception: next_earnings = None
 
     # Financials (annual → quarterly fallback)
-    try:
-        fin_a = tkr.financials
-    except Exception:
-        fin_a = pd.DataFrame()
-    try:
-        fin_q = tkr.quarterly_financials
-    except Exception:
-        fin_q = pd.DataFrame()
+    try: fin_a = tkr.financials
+    except Exception: fin_a = pd.DataFrame()
+    try: fin_q = tkr.quarterly_financials
+    except Exception: fin_q = pd.DataFrame()
     fin = fin_a if isinstance(fin_a, pd.DataFrame) and not fin_a.empty else fin_q
 
     revenue      = get_income_value(fin, ["Total Revenue", "Revenue"])
@@ -233,21 +221,25 @@ if ticker:
 
     st.markdown("---")
 
-    # ---------- KPI Block ----------
+    # ---------- KPI Block (mit Grün-Logik) ----------
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("P/E RATIO", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a")
-    k2.metric("P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a")
-    k3.metric("P/B", f"{pb:.2f}" if pd.notna(pb) else "n/a")
-    k4.metric("DIVIDEND YIELD", fmt_pct(dividend_yield))
-    k5.metric("PAYOUT RATIO", fmt_pct(payout_ratio))
 
-    
+    # Bedingungen:
+    pe_ok  = pd.notna(trailing_pe) and trailing_pe < 10
+    pb_ok  = pd.notna(pb)          and pb < 1
+    dy_ok  = pd.notna(dividend_yield) and dividend_yield > 0.05
+
+    kpi(k1, "P/E RATIO", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a", pe_ok)
+    kpi(k2, "P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a", False)  # keine Regel
+    kpi(k3, "P/B", f"{pb:.2f}" if pd.notna(pb) else "n/a", pb_ok)
+    kpi(k4, "DIVIDEND YIELD", fmt_pct(dividend_yield), dy_ok)
+    kpi(k5, "PAYOUT RATIO", fmt_pct(payout_ratio), False)
+
     st.markdown("---")
 
     # ---------- Two charts side by side ----------
     ch_left, ch_right = st.columns(2)
 
-    # Price
     with ch_left:
         st.caption("Price (Close)")
         try:
@@ -256,28 +248,25 @@ if ticker:
                 series = hist["Close"].dropna()
                 figp, axp = plt.subplots(figsize=(4.6, 2.0))
                 axp.plot(series.index, series.values, linewidth=0.7)
-                
-                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=9)        # vorher 10
-                axp.set_xlabel("Date", fontsize=6)                                  # vorher 8
-                axp.set_ylabel(f"Price ({currency})", fontsize=6)                   # vorher 8
-                axp.tick_params(axis="both", labelsize=6)                           # Ticks kleiner
+                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=9)
+                axp.set_xlabel("Date", fontsize=6)
+                axp.set_ylabel(f"Price ({currency})", fontsize=6)
+                axp.tick_params(axis="both", labelsize=6)
                 style_axes(axp)
-
                 st.pyplot(figp, clear_figure=True)
             else:
                 st.info("No price history available.")
         except Exception as e:
             st.warning(f"Could not load price data: {e}")
 
-    # Income stylized bars
     with ch_right:
         st.caption("Earnings & Revenue (last period)")
-        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Other Expenses", "Earnings"]
+        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]  # ohne Other Expenses
         gross_val = gross_profit if pd.notna(gross_profit) else (
             revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan
         )
-        vals_abs = [bn(revenue), bn(cost_rev), bn(gross_val), bn(other_expenses), bn(net_income)]
-        colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#b04a4a", "#17becf"]
+        vals_abs = [bn(revenue), bn(cost_rev), bn(gross_val), bn(net_income)]
+        colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#17becf"]
 
         fig, ax = plt.subplots(figsize=(4.6, 2.0))
         x = np.arange(len(names))
@@ -309,6 +298,16 @@ if ticker:
     revenue_ttm = safe_get(info, "totalRevenue", np.nan)
     nic_ttm     = safe_get(info, "netIncomeToCommon", np.nan)
 
+    # NEW: Styling-Regeln für Tabelle
+    GREEN = 'color: #16a34a; font-weight:700;'
+    def style_val_rows(row):
+        m = row["Metric"]
+        if m == "EV/EBITDA" and pd.notna(ev_ebitda) and ev_ebitda < 10:
+            return [GREEN, GREEN]
+        if m == "Profit Margin" and pd.notna(profit_m) and profit_m > 0.20:
+            return [GREEN, GREEN]
+        return ["", ""]
+
     val_rows: List[Tuple[str, str]] = [
         ("Enterprise Value",            fmt_money_bn(ev,        currency)),
         ("Trailing P/E",                "n/a" if pd.isna(trailing_pe) else f"{trailing_pe:.2f}×"),
@@ -322,7 +321,9 @@ if ticker:
         ("Net Income to Common (ttm)",  fmt_money_bn(nic_ttm,     currency)),
     ]
     val_df = pd.DataFrame(val_rows, columns=["Metric", "Value"])
-    st.dataframe(val_df, use_container_width=True)
+
+    # Achtung: st.table bewahrt Styler-Farben zuverlässiger als st.dataframe
+    st.table(val_df.style.apply(style_val_rows, axis=1))
 
     st.markdown("---")
 
@@ -330,8 +331,17 @@ if ticker:
     st.subheader("Balance Sheet & Cash Flow")
 
     total_cash = safe_get(info, "totalCash", np.nan)     # mrq
-    d_to_e     = safe_get(info, "debtToEquity", np.nan)  # mrq
+    d_to_e     = safe_get(info, "debtToEquity", np.nan)  # mrq (in % bei Yahoo)
     lfcf       = safe_get(info, "leveredFreeCashflow", np.nan)
+
+    # Regel: Total Debt/Equity < 50%
+    def style_bs_rows(row):
+        if row["Metric"] == "Total Debt/Equity (mrq)" and pd.notna(d_to_e):
+            # Yahoo liefert oft Prozent (z.B. 34.5) – akzeptiere beides:
+            val = float(d_to_e)
+            cond = (val < 50) if val > 1 else (val < 0.50)
+            if cond: return [GREEN, GREEN]
+        return ["", ""]
 
     if pd.notna(d_to_e):
         d_to_e_disp = f"{d_to_e:.1f}% (~{d_to_e/100:.2f}×)" if d_to_e > 5 else f"{d_to_e:.2f}×"
@@ -343,12 +353,9 @@ if ticker:
         ("Total Debt/Equity (mrq)",     d_to_e_disp),
     ]
     bs_df = pd.DataFrame(bs_rows, columns=["Metric", "Value"])
-    st.dataframe(bs_df, use_container_width=True)
+    st.table(bs_df.style.apply(style_bs_rows, axis=1))
 
     st.markdown("---")
 
-
 else:
     st.info("Enter a Yahoo ticker, e.g., BMPS.MI.")
-
-
