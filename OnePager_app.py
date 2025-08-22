@@ -251,7 +251,8 @@ if ticker:
         nic_ttm = safe_get(info, "netIncomeToCommon", np.nan)
         earnings = nic_ttm
         mc = mktcap
-        if pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0:
+    
+        if (pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0):
             # sehr klein & dünner Ring
             figd, axd = plt.subplots(figsize=(1.2, 0.9))
             wedges = axd.pie(
@@ -279,13 +280,13 @@ if ticker:
                 ha="center", va="center", fontsize=6.0,
                 arrowprops=dict(arrowstyle="-", lw=0.6, color="0.4")
             )
-
-        figd.tight_layout(pad=0.15)
-        st.pyplot(figd, clear_figure=True)
-    else:
-        st.caption("P/E donut unavailable (missing market cap or earnings).")
-
-
+    
+            figd.tight_layout(pad=0.15)
+            st.pyplot(figd, clear_figure=True)
+        else:
+            st.caption("P/E donut unavailable (missing market cap or earnings).")
+    
+   
     st.markdown("---")
 
     # ---------- Two charts side by side ----------
