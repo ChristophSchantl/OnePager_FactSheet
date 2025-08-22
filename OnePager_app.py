@@ -281,15 +281,15 @@ if ticker:
         fig, ax = plt.subplots(figsize=(4.6, 2.0))
         x = np.arange(len(names))
         bars = ax.bar(x, vals_abs, color=colors, width=0.6)
-        ax.set_ylabel(f"{sym} bn ({currency})", fontsize=7)
-        ax.set_title(f"{label_tkr} – {currency}", fontsize=8)
+        ax.set_ylabel(f"{sym} bn ({currency})", fontsize=6)
+        ax.set_title(f"{label_tkr} – {currency}", fontsize=7)
         ax.set_xticks(x)
         ax.set_xticklabels(names, rotation=6)
         style_axes(ax)
         for rect, v in zip(bars, vals_abs):
             if pd.notna(v):
                 ax.text(rect.get_x() + rect.get_width()/2, rect.get_height(),
-                        f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=5.8)
+                        f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=5.0)
         st.pyplot(fig, clear_figure=True)
 
     st.markdown("---")
