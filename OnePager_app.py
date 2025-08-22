@@ -1,16 +1,14 @@
 # bmps_onepager_streamlit.py
+# -*- coding: utf-8 -*-
 """
 Banca Monte dei Paschi di Siena (BMPS) – One-Pager (Streamlit)
 Datenquelle: Yahoo Finance via yfinance
 
-Features:
-- Ticker eingeben (Default: BMPS.MI)
-- Kernkennzahlen (KGV, KUV, KBV, Div.-Rendite, Payout, Market Cap, Shares)
-- Unternehmensprofil (Branche, Sektor, Land, Mitarbeiter, Website, Kurzbeschreibung)
-- Income-Statement-Balken (Revenue, Cost of Revenue, Gross Profit, Other Expenses, Net Income)
-- Peer-Vergleich (Forward P/E) + MarketCap-Annotation
-- (Versuch) Eigentümer-Übersicht: Major/Institutional Holders, falls verfügbar
-- Charts: Matplotlib (keine zusätzlichen Libs nötig)
+Korrekturen & Add-ons:
+- Feld "Founded" entfernt
+- Dividend Yield robust normalisiert (0–1 oder 0–100) + TTM-Fallback aus Dividendenhistorie
+- 3‑Jahres Kurschart (flexibel einstellbare Jahre, 1–10) mit Adjusted Close
+- Saubere Anzeige/Abfang fehlender EU‑Holderdaten
 
 Start:
     pip install streamlit yfinance pandas numpy matplotlib
@@ -18,8 +16,7 @@ Start:
 """
 from __future__ import annotations
 import math
-import time
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -41,31 +38,17 @@ def safe_get(d: Dict, key: str, default=np.nan):
         return default
 
 
-def fmt_money(x: float, unit: str = "€") -> str:
-    if pd.isna(x):
-        return "n/a"
-    s = f"{x:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-    return f"{unit} {s}"
-
-
-def fmt_ratio(x: float) -> str:
-    if pd.isna(x):
-        return "n/a"
-    return f"{x:.2f}×"
-
-
-def fmt_pct(x: float) -> str:
-    if pd.isna(x):
-        return "n/a"
-    return f"{x*100:.2f}%"
-
-
 def bn(x: float) -> float:
     return float(x) / 1e9 if pd.notna(x) else np.nan
 
 
-def mm(x: float) -> float:
-    return float(x) / 1e6 if pd.notna(x) else np.nan
+def normalize_percent(x: float) -> float:
+    """Bringt gemischte Prozent-/Fraktionswerte in eine Fraktion (0..1)."""
+    if pd.isna(x):
+        return np.nan
+    if 1.0 < x <= 100.0:
+        return float(x) / 100.0
+    return float(x)
 
 
 def first_notna(*vals):
@@ -83,9 +66,8 @@ def get_income_value(df: pd.DataFrame, candidates: List[str]) -> float:
         key = c.lower()
         if key in df_idx:
             ser = df.loc[df_idx[key]]
-            # Nimm zuletzt verfügbares Jahr/Quartal
             try:
-                return float(ser.dropna().iloc[0])
+                return float(ser.dropna().iloc[0])  # letzte verfügbare Periode
             except Exception:
                 continue
     return np.nan
@@ -93,7 +75,6 @@ def get_income_value(df: pd.DataFrame, candidates: List[str]) -> float:
 
 def load_ticker_info(ticker: str) -> Dict:
     t = yf.Ticker(ticker)
-    # yfinance .info kann langsam sein → minimal warten & fallback fast_info
     try:
         info = t.info or {}
     except Exception:
@@ -101,6 +82,27 @@ def load_ticker_info(ticker: str) -> Dict:
     fast = getattr(t, "fast_info", {}) or {}
     return {"ticker": t, "info": info, "fast": fast}
 
+
+def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
+    """Robuste Ermittlung der Dividendenrendite (Fraktion). Reihenfolge:
+    1) info['dividendYield'] (normalisiert), 2) trailingAnnualDividendYield (normalisiert),
+    3) TTM-Fallback: Summe der letzten 4 Quartalsdividenden / Preis
+    """
+    y0 = normalize_percent(safe_get(info, "dividendYield", np.nan))
+    y1 = normalize_percent(safe_get(info, "trailingAnnualDividendYield", np.nan))
+    y = first_notna(y0, y1, np.nan)
+
+    if (pd.isna(y) or y == 0.0) and pd.notna(price) and price > 0:
+        try:
+            div = tkr.dividends
+            if isinstance(div, pd.Series) and not div.empty:
+                last_date = div.index.max()
+                ttm_sum = div[div.index >= last_date - pd.DateOffset(years=1)].sum()
+                if ttm_sum > 0:
+                    y = float(ttm_sum / price)
+        except Exception:
+            pass
+    return y
 
 # ----------------------------------
 # Sidebar Inputs
@@ -110,9 +112,9 @@ with right:
     st.header("⚙️ Parameter")
     ticker = st.text_input("Ticker (Yahoo)", value="BMPS.MI").strip()
     currency_hint = st.text_input("Währungssymbol (Anzeige)", value="€")
-    founded_text = st.text_input("Founded (optional, manuell)", value="1472")
     peers_default = "FBK.MI, MB.MI, BPE.MI, BAMI.MI"
     peers_text = st.text_input("Peer‑Ticker (kommagetrennt)", value=peers_default)
+    years_window = st.slider("Kurs-Zeitraum (Jahre)", min_value=1, max_value=10, value=3, step=1)
     reload_btn = st.button("Neu laden")
 
 with left:
@@ -147,8 +149,9 @@ if ticker:
     ps_ttm = safe_get(info, "priceToSalesTrailing12Months", np.nan)
     pb = first_notna(safe_get(info, "priceToBook", None), np.nan)
 
-    dividend_yield = safe_get(info, "dividendYield", np.nan)  # Already fraction (e.g., 0.106 = 10.6%)
-    payout_ratio = safe_get(info, "payoutRatio", np.nan)
+    # Dividende
+    dividend_yield = compute_dividend_yield(tkr, price, info)  # Fraktion 0..1
+    payout_ratio = normalize_percent(safe_get(info, "payoutRatio", np.nan))
 
     # Earnings dates
     ed = safe_get(info, "earningsDate", [])
@@ -186,7 +189,7 @@ if ticker:
         other_expenses = op_ex
 
     # ----------------------------------
-    # Header & Meta
+    # Header & Meta (ohne Founded)
     # ----------------------------------
     meta_col1, meta_col2, meta_col3 = st.columns([1.4, 1.1, 1.2])
     with meta_col1:
@@ -197,7 +200,6 @@ if ticker:
         st.markdown(f"**Web:** [{website}]({website})")
         st.write("")
     with meta_col2:
-        st.markdown(f"**Founded:** {founded_text}")
         st.markdown(f"**Industry:** {industry}")
         st.markdown(f"**Sector:** {sector}")
         st.markdown(f"**Employees:** {int(employees) if pd.notna(employees) else 'n/a'}")
@@ -227,7 +229,29 @@ if ticker:
     st.markdown("---")
 
     # ----------------------------------
-    # Income Statement Bars
+    # Price Chart – flexibel (Jahre 1..10)
+    # ----------------------------------
+    st.subheader("Preisverlauf (Adjusted Close)")
+    try:
+        hist = yf.download(ticker, period=f"{years_window}y", interval="1d", progress=False)
+        if isinstance(hist, pd.DataFrame) and not hist.empty:
+            series = hist["Adj Close"].dropna()
+            figp, axp = plt.subplots(figsize=(10, 4))
+            axp.plot(series.index, series.values)
+            axp.set_title(f"{ticker} – {years_window}J Adjusted Close")
+            axp.set_xlabel("Datum")
+            axp.set_ylabel(f"Preis ({currency})")
+            axp.grid(True, linestyle=":", alpha=0.4)
+            st.pyplot(figp, clear_figure=True)
+        else:
+            st.info("Kein Kursverlauf verfügbar.")
+    except Exception as e:
+        st.warning(f"Kursdaten konnten nicht geladen werden: {e}")
+
+    st.markdown("---")
+
+    # ----------------------------------
+    # Income Statement Bars & Peers
     # ----------------------------------
     cols = st.columns([1.2, 1.4])
     with cols[0]:
@@ -245,9 +269,6 @@ if ticker:
         plt.xticks(rotation=15)
         st.pyplot(fig, clear_figure=True)
 
-    # ----------------------------------
-    # Peers (Forward PE)
-    # ----------------------------------
     with cols[1]:
         st.subheader("Peers – Forward P/E & Market Cap")
         peers = [p.strip() for p in peers_text.split(',') if p.strip()]
@@ -300,13 +321,11 @@ if ticker:
 
     with own2:
         st.subheader("Eigentümer‑Kreise (Skizze)")
-        # Versuch: Major Holders
         labels = []
         sizes = []
         try:
             mh = tkr.major_holders
             if isinstance(mh, pd.DataFrame) and not mh.empty:
-                # typisches Format: ["% of Shares Held by All Insider", "% of Shares Held by Institutions", ...]
                 for row in mh.iloc[:, 0].astype(str).tolist():
                     labels.append(row)
                 for val in mh.iloc[:, 1].astype(str).tolist():
@@ -336,8 +355,7 @@ if ticker:
     })
     st.dataframe(meta_table, use_container_width=True)
 
-    if st.button("CSV – Meta exportieren"):
-        st.download_button("Download CSV", data=meta_table.to_csv(index=False).encode("utf-8"), file_name=f"{ticker}_meta.csv", mime="text/csv")
+    st.download_button("CSV – Meta exportieren", data=meta_table.to_csv(index=False).encode("utf-8"), file_name=f"{ticker}_meta.csv", mime="text/csv")
 
 else:
     st.info("Bitte einen gültigen Yahoo‑Ticker eingeben (z. B. BMPS.MI).")
