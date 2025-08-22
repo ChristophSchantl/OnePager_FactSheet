@@ -1,8 +1,5 @@
-# bmps_onepager_streamlit.py
-# -*- coding: utf-8 -*-
-"""
-Banca Monte dei Paschi di Siena (BMPS) – One-Pager (Streamlit)
 
+"""
 Updates:
 - Compact header; English UI
 - Removed custom dates → only years slider
@@ -283,10 +280,12 @@ if ticker:
             sizes = [earnings, max(mc - earnings, 0.0)]
             axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.28))
             axd.set_aspect('equal')
-            axd.text(-1.05, 0.62, "Earnings
-" + f"{sym}{bn(earnings):.2f}b", fontsize=8.5, ha='left', va='center')
-            axd.text(0, -0.06, "Market Cap
-" + f"{sym}{bn(mc):.2f}b", fontsize=8.5, ha='center', va='center')
+            # FIX: f-Strings mit '
+' statt Zeilenbruch im Stringliteral
+            axd.text(-1.05, 0.62, f"Earnings
+{sym}{bn(earnings):.2f}b", fontsize=8.5, ha='left', va='center')
+            axd.text(0, -0.06, f"Market Cap
+{sym}{bn(mc):.2f}b", fontsize=8.5, ha='center', va='center')
             st.pyplot(figd, clear_figure=True)
         else:
             st.caption("P/E donut unavailable (missing market cap or earnings).")
