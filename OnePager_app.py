@@ -135,7 +135,7 @@ def style_axes(ax):
     ax.grid(True, linestyle=":", alpha=0.22)
     for spine in ax.spines.values():
         spine.set_alpha(0.22)
-    ax.tick_params(labelsize=8)
+    ax.tick_params(labelsize=7)
 
 # ---------- Sidebar ----------
 left, right = st.columns([2, 1])
@@ -259,10 +259,10 @@ if ticker:
                 figp, axp = plt.subplots(figsize=(4.6, 2.0))
                 axp.plot(series.index, series.values, linewidth=0.7)
                 
-                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=8)        # vorher 10
-                axp.set_xlabel("Date", fontsize=5)                                  # vorher 8
-                axp.set_ylabel(f"Price ({currency})", fontsize=5)                   # vorher 8
-                axp.tick_params(axis="both", labelsize=5)                           # Ticks kleiner
+                axp.set_title(f"{label_tkr} – {years_window}y", fontsize=9)        # vorher 10
+                axp.set_xlabel("Date", fontsize=6)                                  # vorher 8
+                axp.set_ylabel(f"Price ({currency})", fontsize=6)                   # vorher 8
+                axp.tick_params(axis="both", labelsize=6)                           # Ticks kleiner
                 style_axes(axp)
 
                 st.pyplot(figp, clear_figure=True)
@@ -284,10 +284,10 @@ if ticker:
         fig, ax = plt.subplots(figsize=(4.6, 2.0))
         x = np.arange(len(names))
         bars = ax.bar(x, vals_abs, color=colors, width=0.8)
-        ax.set_ylabel(f"{sym} bn ({currency})", fontsize=6)
-        ax.set_title(f"{label_tkr} – {currency}", fontsize=6)
+        ax.set_ylabel(f"{sym} bn ({currency})", fontsize=7)
+        ax.set_title(f"{label_tkr} – {currency}", fontsize=7)
         ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=9)
+        ax.set_xticklabels(names, rotation=10)
         style_axes(ax)
         for rect, v in zip(bars, vals_abs):
             if pd.notna(v):
@@ -315,7 +315,6 @@ if ticker:
         ("Enterprise Value",            fmt_money_bn(ev,        currency)),
         ("Trailing P/E",                "n/a" if pd.isna(trailing_pe) else f"{trailing_pe:.2f}×"),
         ("Forward P/E",                 "n/a" if pd.isna(forward_pe)  else f"{forward_pe:.2f}×"),
-        ("PEG (5y exp)",                "n/a" if pd.isna(peg)         else f"{peg:.2f}"),
         ("EV/Revenue",                  "n/a" if pd.isna(ev_rev)      else f"{ev_rev:.2f}×"),
         ("EV/EBITDA",                   "n/a" if pd.isna(ev_ebitda)   else f"{ev_ebitda:.2f}×"),
         ("Profit Margin",               fmt_pct(profit_m)),
@@ -344,7 +343,6 @@ if ticker:
     bs_rows: List[Tuple[str, str]] = [
         ("Total Cash (mrq)",            fmt_money_bn(total_cash, currency)),
         ("Total Debt/Equity (mrq)",     d_to_e_disp),
-        ("Levered Free Cash Flow",      fmt_money_bn(lfcf,       currency)),
     ]
     bs_df = pd.DataFrame(bs_rows, columns=["Metric", "Value"])
     st.dataframe(bs_df, use_container_width=True)
