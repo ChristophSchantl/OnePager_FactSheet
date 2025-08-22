@@ -254,11 +254,11 @@ if ticker:
     
         if (pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0):
             # sehr klein & dünner Ring
-            figd, axd = plt.subplots(figsize=(1.2, 0.9))
+            figd, axd = plt.subplots(figsize=(0.6, 0.45))
             wedges = axd.pie(
                 [earnings, max(mc - earnings, 0.0)],
                 startangle=90,
-                wedgeprops=dict(width=0.16),
+                wedgeprops=dict(width=0.10),
                 colors=["#1f77b4", "#ff7f0e"]
             )[0]
             axd.set_aspect("equal")
@@ -266,7 +266,7 @@ if ticker:
             # zentrales Label: Market Cap (klein & fett)
             axd.text(
                 0, 0, f"Market Cap\n{sym}{bn(mc):.2f}b",
-                ha="center", va="center", fontsize=6.0, weight=600
+                ha="center", va="center", fontsize=3.5, weight=600
             )
     
             # Earnings als Annotation außerhalb, mit feinem Pfeil
@@ -275,13 +275,13 @@ if ticker:
             x, y = np.cos(np.deg2rad(ang)), np.sin(np.deg2rad(ang))
             axd.annotate(
                 f"Earnings\n{sym}{bn(earnings):.2f}b",
-                xy=(x * 0.92, y * 0.92), xycoords="data",
-                xytext=(x * 1.35, y * 1.35), textcoords="data",
-                ha="center", va="center", fontsize=6.0,
+                xy=(x * 0.90, y * 0.90), xycoords="data",
+                xytext=(x * 1.18, y * 1.18), textcoords="data",
+                ha="center", va="center", fontsize=3.5,
                 arrowprops=dict(arrowstyle="-", lw=0.6, color="0.4")
             )
     
-            figd.tight_layout(pad=0.15)
+            figd.tight_layout(pad=0.10)
             st.pyplot(figd, clear_figure=True)
         else:
             st.caption("P/E donut unavailable (missing market cap or earnings).")
