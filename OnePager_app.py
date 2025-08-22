@@ -243,30 +243,48 @@ if ticker:
     k4.metric("DIVIDEND YIELD", fmt_pct(dividend_yield))
     k5.metric("PAYOUT RATIO", fmt_pct(payout_ratio))
 
-    # ---------- P/E Donut (HALF SIZE, no right-side label) ----------
+    # ---------- P/E Donut (tiny, outside earnings label) ----------
     st.markdown("---")
     donut_l, _spacer = st.columns([0.8, 1.2])  # rechts nur Spacer
-
+    
     with donut_l:
         nic_ttm = safe_get(info, "netIncomeToCommon", np.nan)
         earnings = nic_ttm
         mc = mktcap
         if pd.notna(earnings) and pd.notna(mc) and earnings > 0 and mc > 0:
-            # vorher ~ (2.8, 1.6) -> jetzt etwa halb so groß
-            figd, axd = plt.subplots(figsize=(1.4, 0.8))
-            sizes = [earnings, max(mc - earnings, 0.0)]
-            axd.pie(sizes, startangle=90, wedgeprops=dict(width=0.18))
+            # sehr klein & dünner Ring
+            figd, axd = plt.subplots(figsize=(1.2, 0.9))
+            wedges = axd.pie(
+                [earnings, max(mc - earnings, 0.0)],
+                startangle=90,
+                wedgeprops=dict(width=0.16),
+                colors=["#1f77b4", "#ff7f0e"]
+            )[0]
             axd.set_aspect("equal")
+    
+            # zentrales Label: Market Cap (klein & fett)
+            axd.text(
+                0, 0, f"Market Cap\n{sym}{bn(mc):.2f}b",
+                ha="center", va="center", fontsize=6.0, weight=600
+            )
+    
+            # Earnings als Annotation außerhalb, mit feinem Pfeil
+            w = wedges[0]  # Earnings-Wedge
+            ang = 0.5 * (w.theta2 + w.theta1)
+            x, y = np.cos(np.deg2rad(ang)), np.sin(np.deg2rad(ang))
+            axd.annotate(
+                f"Earnings\n{sym}{bn(earnings):.2f}b",
+                xy=(x * 0.92, y * 0.92), xycoords="data",
+                xytext=(x * 1.35, y * 1.35), textcoords="data",
+                ha="center", va="center", fontsize=6.0,
+                arrowprops=dict(arrowstyle="-", lw=0.6, color="0.4")
+            )
 
-            earn_lbl = f"{sym}{bn(earnings):.2f}b"
-            mc_lbl   = f"{sym}{bn(mc):.2f}b"
-            axd.text(-0.52, 0.40, f"Earnings\n{earn_lbl}", fontsize=6.3, ha="left",  va="center")
-            axd.text( 0.00, -0.03, f"Market Cap\n{mc_lbl}", fontsize=6.3, ha="center", va="center")
+        figd.tight_layout(pad=0.15)
+        st.pyplot(figd, clear_figure=True)
+    else:
+        st.caption("P/E donut unavailable (missing market cap or earnings).")
 
-            figd.tight_layout(pad=0.2)
-            st.pyplot(figd, clear_figure=True)
-        else:
-            st.caption("P/E donut unavailable (missing market cap or earnings).")
 
     st.markdown("---")
 
