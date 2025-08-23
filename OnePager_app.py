@@ -18,15 +18,24 @@ st.set_page_config(page_title="SHI – STOCK CHECK", layout="wide")
 st.markdown(
     """
     <style>
-      .block-container {padding-top:1.1rem; padding-bottom:0.6rem;}
-      .page-title {font-size:1.8rem; font-weight:800; margin:0 0 .6rem 0;}
-      .kpi-wrap {margin:0.15rem 0;}
-      .kpi-label {font-size:.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em;}
-      .kpi-value {font-size:1.38rem; font-weight:700; color:#111;}
-      .kpi-green {color:#16a34a !important;}
-      .smallnote {color:#666; font-size:.8rem;}
-      [data-testid="stMetricValue"] {font-size:1.2rem;}
-      [data-testid="stMetricLabel"] {font-size:.75rem; color:#666;}
+      /* Genug Abstand unter der fixen Streamlit-Headerleiste */
+      .main .block-container {
+        padding-top: 3.2rem !important;
+        padding-bottom: 0.6rem;
+      }
+      @media (max-width: 768px) {
+        .main .block-container { padding-top: 3.8rem !important; }
+      }
+
+      /* Restliche Styles (ohne erneutes padding-top!) */
+      .page-title { font-size:1.8rem; font-weight:800; margin:0.2rem 0 .6rem 0; line-height:1.25; }
+      .kpi-wrap { margin:0.15rem 0; }
+      .kpi-label { font-size:.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em; }
+      .kpi-value { font-size:1.38rem; font-weight:700; color:#111; }
+      .kpi-green { color:#16a34a !important; }
+      .smallnote { color:#666; font-size:.8rem; }
+      [data-testid="stMetricValue"] { font-size:1.2rem; }
+      [data-testid="stMetricLabel"] { font-size:.75rem; color:#666; }
     </style>
     """,
     unsafe_allow_html=True,
