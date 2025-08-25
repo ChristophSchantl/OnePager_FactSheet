@@ -450,11 +450,11 @@ try:
     st.table(bs_df.style.apply(style_bs_rows, axis=1))
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Export-Bereich: NUR CSV
+    # Export-Bereich: CSV (US) + CSV (EU)
     # ──────────────────────────────────────────────────────────────────────────
     st.markdown("---")
     st.subheader("Export")
-
+    
     meta_dict = {
         "currency": currency,
         "label_tkr": label_tkr,
@@ -468,16 +468,33 @@ try:
     }
     computed = {"dividend_yield": dividend_yield, "payout_ratio": payout_ratio}
     metrics_df = build_metrics_df(meta_dict, info, computed)
+    
+    col_us, col_eu = st.columns(2)
+    
+    with col_us:
+        st.caption("CSV (US-Format: , & .)")
+        csv_us = metrics_df.to_csv(index=False)
+        st.download_button(
+            label="⬇️ CSV (US)",
+            data=csv_us.encode("utf-8"),
+            file_name=f"{label_tkr}_metrics.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    
+    with col_eu:
+        st.caption("CSV (EU-Format: ; & ,)")
+        # Hinweis: 'decimal' setzt das Dezimalzeichen, ';' ist das Spaltentrennzeichen.
+        # 'utf-8-sig' sorgt dafür, dass Excel unter Windows Umlaute korrekt erkennt.
+        csv_eu = metrics_df.to_csv(index=False, sep=";", decimal=",", float_format="%.4f")
+        st.download_button(
+            label="⬇️ CSV (EU)",
+            data=csv_eu.encode("utf-8-sig"),
+            file_name=f"{label_tkr}_metrics_eu.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
-    st.caption("CSV")
-    csv_bytes = metrics_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="⬇️ Kennzahlen als CSV",
-        data=csv_bytes,
-        file_name=f"{label_tkr}_metrics.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
 
 except Exception as e:
     st.error(f"Could not load data for '{ticker}': {e}")
