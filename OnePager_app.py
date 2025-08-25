@@ -151,7 +151,7 @@ def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
         return []
 
 # ──────────────────────────────────────────────────────────────────────────────
-# NEW: Kennzahlen-DF bauen + Export (CSV / Google Sheets)
+# NEW: Kennzahlen-DF bauen (für CSV-Export)
 # ──────────────────────────────────────────────────────────────────────────────
 def _as_num(x):
     try:
@@ -209,35 +209,6 @@ def build_metrics_df(meta: Dict, info: Dict, computed: Dict) -> pd.DataFrame:
 
     df = pd.DataFrame(rows, columns=["Metric", "Value", "Unit"])
     return df
-
-def export_to_google_sheets(df: pd.DataFrame, sheet_id: str, worksheet_name: str) -> Tuple[bool, str]:
-    """Exportiert DF nach Google Sheets. Erwartet Service-Account in st.secrets['gcp_service_account']."""
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-    except Exception:
-        return False, "Module fehlen: Installiere 'gspread' und 'google-auth' (pip install gspread google-auth)."
-
-    try:
-        sa_info = st.secrets["gcp_service_account"]
-    except Exception:
-        return False, "Service-Account fehlt: Hinterlege JSON in st.secrets['gcp_service_account']."
-
-    try:
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
-        gc = gspread.authorize(creds)
-        sh = gc.open_by_key(sheet_id)
-        try:
-            ws = sh.worksheet(worksheet_name)
-        except gspread.exceptions.WorksheetNotFound:
-            ws = sh.add_worksheet(title=worksheet_name, rows=str(max(len(df)+10, 1000)), cols=str(max(len(df.columns)+10, 26)))
-        ws.clear()
-        values = [df.columns.tolist()] + df.astype(object).where(pd.notna(df), "").values.tolist()
-        ws.update(values)
-        return True, f"Export erfolgreich → Sheet '{worksheet_name}'."
-    except Exception as e:
-        return False, f"Google Sheets Export fehlgeschlagen: {e}"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Session defaults
@@ -413,7 +384,7 @@ try:
                         f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=6)
         st.pyplot(fig, clear_figure=True)
 
-    # Valuation & Profitability (mit Regeln)
+    # Valuation & Profitability
     st.markdown("---")
     st.subheader("Valuation & Profitability")
     ev         = safe_get(info, "enterpriseValue", np.nan)
@@ -451,7 +422,7 @@ try:
     val_df = pd.DataFrame(val_rows, columns=["Metric", "Value"])
     st.table(val_df.style.apply(style_val_rows, axis=1))
 
-    # Balance Sheet & Cash Flow (mit Regel)
+    # Balance Sheet & Cash Flow
     st.markdown("---")
     st.subheader("Balance Sheet & Cash Flow")
     total_cash = safe_get(info, "totalCash", np.nan)     # mrq
@@ -479,7 +450,7 @@ try:
     st.table(bs_df.style.apply(style_bs_rows, axis=1))
 
     # ──────────────────────────────────────────────────────────────────────────
-    # NEW: Export-Bereich
+    # Export-Bereich: NUR CSV
     # ──────────────────────────────────────────────────────────────────────────
     st.markdown("---")
     st.subheader("Export")
@@ -498,30 +469,15 @@ try:
     computed = {"dividend_yield": dividend_yield, "payout_ratio": payout_ratio}
     metrics_df = build_metrics_df(meta_dict, info, computed)
 
-    c1, c2 = st.columns([2, 3])
-    with c1:
-        st.caption("CSV")
-        csv_bytes = metrics_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Kennzahlen als CSV",
-            data=csv_bytes,
-            file_name=f"{label_tkr}_metrics.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-
-    with c2:
-        st.caption("Google Sheets")
-        gs_sheet_id = st.text_input("Google Sheet ID (aus der URL)", value="", placeholder="z. B. 1abcDEF...xyz")
-        gs_tab = st.text_input("Worksheet-Name", value=label_tkr)
-        if st.button("Export nach Google Sheets", use_container_width=True, type="primary"):
-            if not gs_sheet_id.strip():
-                st.error("Bitte eine gültige Google-Sheet-ID angeben.")
-            else:
-                ok, msg = export_to_google_sheets(metrics_df, gs_sheet_id.strip(), gs_tab.strip() or "Sheet1")
-                (st.success if ok else st.error)(msg)
-                if ok:
-                    st.info("Hinweis: Das Ziel-Sheet muss für die Service-Account-E-Mail freigegeben sein.")
+    st.caption("CSV")
+    csv_bytes = metrics_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="⬇️ Kennzahlen als CSV",
+        data=csv_bytes,
+        file_name=f"{label_tkr}_metrics.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
 except Exception as e:
     st.error(f"Could not load data for '{ticker}': {e}")
