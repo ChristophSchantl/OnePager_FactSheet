@@ -18,7 +18,6 @@ st.set_page_config(page_title="SHI – STOCK CHECK", layout="wide")
 st.markdown(
     """
     <style>
-      /* Genug Abstand unter der fixen Streamlit-Headerleiste */
       .main .block-container {
         padding-top: 3.2rem !important;
         padding-bottom: 0.6rem;
@@ -26,8 +25,6 @@ st.markdown(
       @media (max-width: 768px) {
         .main .block-container { padding-top: 3.8rem !important; }
       }
-
-      /* Restliche Styles (ohne erneutes padding-top!) */
       .page-title { font-size:1.8rem; font-weight:800; margin:0.2rem 0 .6rem 0; line-height:1.25; }
       .kpi-wrap { margin:0.15rem 0; }
       .kpi-label { font-size:.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em; }
@@ -62,7 +59,7 @@ def normalize_percent_robust(x: float) -> float:
     if pd.isna(x): return np.nan
     try: y = float(x)
     except Exception: return np.nan
-    while y > 1.0:  # 10.5 -> 0.105
+    while y > 1.0:
         y /= 100.0
     return np.nan if y < 0 else y
 
@@ -100,7 +97,7 @@ def compute_dividend_yield(tkr: yf.Ticker, price: float, info: Dict) -> float:
                 if ttm > 0: y = float(ttm / price)
         except Exception:
             pass
-    if pd.notna(y) and y > 0.5:  # unrealistisch hoch -> ignoriere
+    if pd.notna(y) and y > 0.5:
         return np.nan
     return y
 
@@ -116,12 +113,9 @@ def kpi(col, label: str, value_str: str, highlight: bool = False):
 def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
     if not query:
         return []
-    headers = {
-        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                       "AppleWebKit/537.36 (KHTML, like Gecko) "
-                       "Chrome/124.0 Safari/537.36")
-    }
-    # 1) Haupt-Endpoint
+    headers = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/124.0 Safari/537.36")}
     try:
         url = "https://query2.finance.yahoo.com/v1/finance/search"
         params = {"q": query, "quotesCount": limit, "newsCount": 0, "listsCount": 0}
@@ -139,7 +133,6 @@ def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
             return out[:limit]
     except Exception:
         pass
-    # 2) Fallback
     try:
         url = "https://autoc.finance.yahoo.com/autoc"
         params = {"query": query, "region": 1, "lang": "en"}
@@ -158,10 +151,99 @@ def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
         return []
 
 # ──────────────────────────────────────────────────────────────────────────────
+# NEW: Kennzahlen-DF bauen + Export (CSV / Google Sheets)
+# ──────────────────────────────────────────────────────────────────────────────
+def _as_num(x):
+    try:
+        if pd.isna(x): return np.nan
+        return float(x)
+    except Exception:
+        return np.nan
+
+def build_metrics_df(meta: Dict, info: Dict, computed: Dict) -> pd.DataFrame:
+    """Liefert flaches DF mit Kennzahlen: Metric | Value | Unit"""
+    cur = meta.get("currency", "EUR")
+    rows: List[Tuple[str, float, str]] = []
+
+    # Meta
+    rows += [
+        ("Ticker", np.nan, meta.get("label_tkr", "")),
+        ("Name", np.nan, meta.get("long_name", "")),
+        ("Exchange", np.nan, meta.get("exchange", "")),
+        ("Country", np.nan, meta.get("country", "")),
+        ("Currency", np.nan, cur),
+        ("Employees", _as_num(meta.get("employees")), "count"),
+        ("Shares Outstanding (bn)", _as_num(bn(meta.get("shares"))), "bn"),
+        ("Market Cap (bn)", _as_num(bn(meta.get("mktcap"))), f"bn {cur}"),
+        ("Price", _as_num(meta.get("price")), cur),
+    ]
+
+    # KPIs
+    rows += [
+        ("Trailing P/E", _as_num(info.get("trailingPE")), "x"),
+        ("P/S (TTM)", _as_num(info.get("priceToSalesTrailing12Months")), "x"),
+        ("P/B", _as_num(info.get("priceToBook")), "x"),
+        ("Dividend Yield", _as_num(computed.get("dividend_yield") * 100 if pd.notna(computed.get("dividend_yield")) else np.nan), "%"),
+        ("Payout Ratio", _as_num(computed.get("payout_ratio") * 100 if pd.notna(computed.get("payout_ratio")) else np.nan), "%"),
+    ]
+
+    # Valuation & Profitability
+    rows += [
+        ("Enterprise Value (bn)", _as_num(bn(info.get("enterpriseValue"))), f"bn {cur}"),
+        ("EV/Revenue", _as_num(first_notna(info.get("enterpriseToRevenue"), info.get("enterpriseToRev"))), "x"),
+        ("EV/EBITDA", _as_num(info.get("enterpriseToEbitda")), "x"),
+        ("Profit Margin", _as_num(info.get("profitMargins") * 100 if pd.notna(info.get("profitMargins")) else np.nan), "%"),
+        ("ROA (ttm)", _as_num(info.get("returnOnAssets") * 100 if pd.notna(info.get("returnOnAssets")) else np.nan), "%"),
+        ("ROE (ttm)", _as_num(info.get("returnOnEquity") * 100 if pd.notna(info.get("returnOnEquity")) else np.nan), "%"),
+        ("Revenue (ttm) (bn)", _as_num(bn(info.get("totalRevenue"))), f"bn {cur}"),
+        ("Net Income to Common (ttm) (bn)", _as_num(bn(info.get("netIncomeToCommon"))), f"bn {cur}"),
+    ]
+
+    # Balance Sheet & CF
+    d_to_e = info.get("debtToEquity")
+    rows += [
+        ("Total Cash (mrq) (bn)", _as_num(bn(info.get("totalCash"))), f"bn {cur}"),
+        ("Total Debt/Equity (mrq)", _as_num(d_to_e if (pd.isna(d_to_e) or d_to_e <= 5) else d_to_e/100.0), "x"),
+        ("Levered Free Cash Flow (bn)", _as_num(bn(info.get("leveredFreeCashflow"))), f"bn {cur}"),
+    ]
+
+    df = pd.DataFrame(rows, columns=["Metric", "Value", "Unit"])
+    return df
+
+def export_to_google_sheets(df: pd.DataFrame, sheet_id: str, worksheet_name: str) -> Tuple[bool, str]:
+    """Exportiert DF nach Google Sheets. Erwartet Service-Account in st.secrets['gcp_service_account']."""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except Exception:
+        return False, "Module fehlen: Installiere 'gspread' und 'google-auth' (pip install gspread google-auth)."
+
+    try:
+        sa_info = st.secrets["gcp_service_account"]
+    except Exception:
+        return False, "Service-Account fehlt: Hinterlege JSON in st.secrets['gcp_service_account']."
+
+    try:
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet(worksheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title=worksheet_name, rows=str(max(len(df)+10, 1000)), cols=str(max(len(df.columns)+10, 26)))
+        ws.clear()
+        values = [df.columns.tolist()] + df.astype(object).where(pd.notna(df), "").values.tolist()
+        ws.update(values)
+        return True, f"Export erfolgreich → Sheet '{worksheet_name}'."
+    except Exception as e:
+        return False, f"Google Sheets Export fehlgeschlagen: {e}"
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Session defaults
 # ──────────────────────────────────────────────────────────────────────────────
 if "ticker" not in st.session_state:
-    st.session_state.ticker = "BMPS.MI"   # zentrale Quelle der Wahrheit
+    st.session_state.ticker = "BMPS.MI"
 if "search_results" not in st.session_state:
     st.session_state.search_results = []
 if "search_query" not in st.session_state:
@@ -174,8 +256,6 @@ left, right = st.columns([2, 1])
 
 with left:
     st.markdown("<div class='page-title'>SHI - STOCK CHECK</div>", unsafe_allow_html=True)
-
-    # Suche (links)
     st.text_input("Search company or ticker", key="search_query", placeholder="e.g. Microsoft or MSFT")
     if st.button("Search"):
         st.session_state.search_results = yahoo_symbol_search(st.session_state.search_query)
@@ -190,13 +270,13 @@ with left:
                             format_func=lambda i: labels[i], key="search_pick")
         if st.button("Use selection"):
             chosen = results[pick]
-            st.session_state.ticker = chosen["symbol"]   # einheitlicher Key
+            st.session_state.ticker = chosen["symbol"]
             st.success(f"Using {chosen['symbol']}")
             st.rerun()
 
 with right:
     st.header("Parameters")
-    st.text_input("Ticker", key="ticker")     # gleiches State-Objekt
+    st.text_input("Ticker", key="ticker")
     years_window = st.slider("Price window (years)", 1, 10, 3, 1)
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -312,7 +392,7 @@ try:
 
     with ch_right:
         st.caption("Earnings & Revenue (last period)")
-        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]  # ohne Other Expenses
+        names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]
         gross_val = gross_profit if pd.notna(gross_profit) else (
             revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan
         )
@@ -381,7 +461,7 @@ try:
     def style_bs_rows(row):
         if row["Metric"] == "Total Debt/Equity (mrq)" and pd.notna(d_to_e):
             val = float(d_to_e)
-            cond = (val < 50) if val > 1 else (val < 0.50)  # Prozent vs. Faktor
+            cond = (val < 50) if val > 1 else (val < 0.50)
             if cond: return [GREEN, GREEN]
         return ["", ""]
 
@@ -397,6 +477,51 @@ try:
     ]
     bs_df = pd.DataFrame(bs_rows, columns=["Metric", "Value"])
     st.table(bs_df.style.apply(style_bs_rows, axis=1))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # NEW: Export-Bereich
+    # ──────────────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("Export")
+
+    meta_dict = {
+        "currency": currency,
+        "label_tkr": label_tkr,
+        "long_name": long_name,
+        "exchange": exch,
+        "country": country,
+        "employees": employees,
+        "shares": shares,
+        "mktcap": mktcap,
+        "price": price,
+    }
+    computed = {"dividend_yield": dividend_yield, "payout_ratio": payout_ratio}
+    metrics_df = build_metrics_df(meta_dict, info, computed)
+
+    c1, c2 = st.columns([2, 3])
+    with c1:
+        st.caption("CSV")
+        csv_bytes = metrics_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇️ Kennzahlen als CSV",
+            data=csv_bytes,
+            file_name=f"{label_tkr}_metrics.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    with c2:
+        st.caption("Google Sheets")
+        gs_sheet_id = st.text_input("Google Sheet ID (aus der URL)", value="", placeholder="z. B. 1abcDEF...xyz")
+        gs_tab = st.text_input("Worksheet-Name", value=label_tkr)
+        if st.button("Export nach Google Sheets", use_container_width=True, type="primary"):
+            if not gs_sheet_id.strip():
+                st.error("Bitte eine gültige Google-Sheet-ID angeben.")
+            else:
+                ok, msg = export_to_google_sheets(metrics_df, gs_sheet_id.strip(), gs_tab.strip() or "Sheet1")
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.info("Hinweis: Das Ziel-Sheet muss für die Service-Account-E-Mail freigegeben sein.")
 
 except Exception as e:
     st.error(f"Could not load data for '{ticker}': {e}")
