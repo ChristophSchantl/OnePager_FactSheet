@@ -109,6 +109,39 @@ def kpi(col, label: str, value_str: str, highlight: bool = False):
         unsafe_allow_html=True,
     )
 
+
+# ── Put/Call Ratio (nächste Fälligkeit) ─────────────────────
+def compute_put_call_ratio(tkr: yf.Ticker) -> Tuple[float, float, str | None]:
+    try:
+        exps = getattr(tkr, "options", []) or []
+        if not exps:
+            return np.nan, np.nan, None
+
+        today = pd.Timestamp.today().normalize()
+        dates = [pd.to_datetime(x, errors="coerce") for x in exps]
+        future = [d for d in dates if pd.notna(d) and d >= today]
+        exp_dt = min(future) if future else min([d for d in dates if pd.notna(d)])
+        exp = exp_dt.strftime("%Y-%m-%d")
+
+        oc = tkr.option_chain(exp)
+        calls = getattr(oc, "calls", pd.DataFrame())
+        puts  = getattr(oc, "puts",  pd.DataFrame())
+
+        c_vol = float(pd.to_numeric(calls.get("volume"), errors="coerce").fillna(0).sum()) if not calls.empty else 0.0
+        p_vol = float(pd.to_numeric(puts.get("volume"),  errors="coerce").fillna(0).sum()) if not puts.empty  else 0.0
+        pcr_vol = p_vol / c_vol if c_vol > 0 else np.nan
+
+        c_oi = float(pd.to_numeric(calls.get("openInterest"), errors="coerce").fillna(0).sum()) if not calls.empty else 0.0
+        p_oi = float(pd.to_numeric(puts.get("openInterest"),  errors="coerce").fillna(0).sum()) if not puts.empty  else 0.0
+        pcr_oi = p_oi / c_oi if c_oi > 0 else np.nan
+
+        return pcr_vol, pcr_oi, exp
+    except Exception:
+        return np.nan, np.nan, None
+
+
+
+
 # ── Yahoo Symbol Suche (robust, mit Fallback) ─────────────────────────────────
 def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
     if not query:
@@ -150,6 +183,11 @@ def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
     except Exception:
         return []
 
+
+
+
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # NEW: Kennzahlen-DF bauen (für CSV-Export)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -185,6 +223,8 @@ def build_metrics_df(meta: Dict, info: Dict, computed: Dict) -> pd.DataFrame:
         ("P/B", _as_num(info.get("priceToBook")), "x"),
         ("Dividend Yield", _as_num(computed.get("dividend_yield") * 100 if pd.notna(computed.get("dividend_yield")) else np.nan), "%"),
         ("Payout Ratio", _as_num(computed.get("payout_ratio") * 100 if pd.notna(computed.get("payout_ratio")) else np.nan), "%"),
+        ("Put/Call Ratio (vol)", _as_num(computed.get("pcr_vol")), "x"),
+        ("Put/Call Ratio (OI)",  _as_num(computed.get("pcr_oi")),  "x"),
     ]
 
     # Valuation & Profitability
@@ -283,6 +323,11 @@ try:
     dividend_yield = compute_dividend_yield(tkr, price, info)
     payout_ratio = normalize_percent_robust(safe_get(info, "payoutRatio", np.nan))
 
+    # Put/Call Ratio
+    pcr_vol, pcr_oi, pcr_exp = compute_put_call_ratio(tkr)
+
+
+    
     # Financials
     fin_a = tkr.financials if isinstance(getattr(tkr, "financials", None), pd.DataFrame) else pd.DataFrame()
     fin_q = tkr.quarterly_financials if isinstance(getattr(tkr, "quarterly_financials", None), pd.DataFrame) else pd.DataFrame()
@@ -327,16 +372,23 @@ try:
 
     # KPI-Zeile mit Grüner Regel
     st.markdown("---")
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)  # <- vorher 5
+    
     pe_ok  = pd.notna(trailing_pe) and trailing_pe < 10
     pb_ok  = pd.notna(pb)          and pb < 1
     dy_ok  = pd.notna(dividend_yield) and dividend_yield > 0.05
-
+    
     kpi(k1, "P/E RATIO", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a", pe_ok)
     kpi(k2, "P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a", False)
     kpi(k3, "P/B", f"{pb:.2f}" if pd.notna(pb) else "n/a", pb_ok)
     kpi(k4, "DIVIDEND YIELD", "n/a" if pd.isna(dividend_yield) else f"{dividend_yield*100:.2f}%", dy_ok)
     kpi(k5, "PAYOUT RATIO", "n/a" if pd.isna(payout_ratio) else f"{payout_ratio*100:.2f}%", False)
+    
+    pcr_str_parts = []
+    if pd.notna(pcr_vol): pcr_str_parts.append(f"vol {pcr_vol:.2f}")
+    if pd.notna(pcr_oi):  pcr_str_parts.append(f"OI {pcr_oi:.2f}")
+    pcr_str = " | ".join(pcr_str_parts) if pcr_str_parts else "n/a"
+    kpi(k6, "PUT/CALL RATIO", pcr_str, False)
 
     # Zwei kleine Charts nebeneinander
     st.markdown("---")
@@ -466,7 +518,14 @@ try:
         "mktcap": mktcap,
         "price": price,
     }
-    computed = {"dividend_yield": dividend_yield, "payout_ratio": payout_ratio}
+    computed = {
+        "dividend_yield": dividend_yield,
+        "payout_ratio": payout_ratio,
+        "pcr_vol": pcr_vol,
+        "pcr_oi": pcr_oi,
+        "pcr_exp": pcr_exp,
+    }
+
     metrics_df = build_metrics_df(meta_dict, info, computed)
     
     col_us, col_eu = st.columns(2)
