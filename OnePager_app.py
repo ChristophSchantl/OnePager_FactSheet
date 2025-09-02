@@ -18,13 +18,8 @@ st.set_page_config(page_title="SHI – STOCK CHECK", layout="wide")
 st.markdown(
     """
     <style>
-      .main .block-container {
-        padding-top: 3.2rem !important;
-        padding-bottom: 0.6rem;
-      }
-      @media (max-width: 768px) {
-        .main .block-container { padding-top: 3.8rem !important; }
-      }
+      .main .block-container { padding-top: 3.2rem !important; padding-bottom: 0.6rem; }
+      @media (max-width: 768px) { .main .block-container { padding-top: 3.8rem !important; } }
       .page-title { font-size:1.8rem; font-weight:800; margin:0.2rem 0 .6rem 0; line-height:1.25; }
       .kpi-wrap { margin:0.15rem 0; }
       .kpi-label { font-size:.78rem; color:#444; text-transform:uppercase; letter-spacing:.02em; }
@@ -133,7 +128,7 @@ def compute_put_call_ratio(tkr: yf.Ticker) -> Tuple[float, float, Optional[str]]
     except Exception:
         return np.nan, np.nan, None
 
-# Volume/Open Interest Ratios (nächste Fälligkeit)
+# VOI-Ratios (nächste Fälligkeit)
 def compute_voi_ratios(tkr: yf.Ticker) -> Tuple[float, float, float, Optional[str]]:
     try:
         exps = getattr(tkr, "options", []) or []
@@ -158,7 +153,7 @@ def compute_voi_ratios(tkr: yf.Ticker) -> Tuple[float, float, float, Optional[st
     except Exception:
         return np.nan, np.nan, np.nan, None
 
-# Yahoo Symbol Suche (robust, mit Fallback)
+# Yahoo-Suche
 def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
     if not query:
         return []
@@ -199,7 +194,35 @@ def yahoo_symbol_search(query: str, limit: int = 12) -> List[Dict]:
     except Exception:
         return []
 
-# Kennzahlen-DF bauen (für CSV-Export)
+# CSV-Ticker-Parsing
+def parse_tickers(s: str, max_n: int = 10) -> List[str]:
+    if not s:
+        return []
+    for sep in [";", "\n", "\t", " "]:
+        s = s.replace(sep, ",")
+    toks = [t.strip().upper() for t in s.split(",") if t.strip()]
+    return list(dict.fromkeys(toks))[:max_n]
+
+def parse_csv_tickers(file, max_n: int = 10) -> List[str]:
+    try:
+        df = pd.read_csv(file, dtype=str)
+        if df.empty:
+            return []
+        cols = [c for c in df.columns if str(c).lower() in ("ticker","symbol","code")]
+        if not cols:
+            cols = [df.columns[0]]
+        values: List[str] = []
+        for c in cols:
+            series = df[c].dropna().astype(str).tolist()
+            for cell in series:
+                for sep in [",",";"," ","\t","\n"]:
+                    cell = cell.replace(sep, ",")
+                values.extend([t.strip().upper() for t in cell.split(",") if t.strip()])
+        return list(dict.fromkeys(values))[:max_n]
+    except Exception:
+        return []
+
+# Kennzahlen-DF (für Einzeltitel-Export)
 def _as_num(x):
     try:
         if pd.isna(x): return np.nan
@@ -246,30 +269,12 @@ def build_metrics_df(meta: Dict, info: Dict, computed: Dict) -> pd.DataFrame:
         ("Revenue (ttm) (bn)", _as_num(bn(info.get("totalRevenue"))), f"bn {cur}"),
         ("Net Income to Common (ttm) (bn)", _as_num(bn(info.get("netIncomeToCommon"))), f"bn {cur}"),
     ]
-
-    d_to_e = info.get("debtToEquity")
-    rows += [
-        ("Total Cash (mrq) (bn)", _as_num(bn(info.get("totalCash"))), f"bn {cur}"),
-        ("Total Debt/Equity (mrq)", _as_num(d_to_e if (pd.isna(d_to_e) or d_to_e <= 5) else d_to_e/100.0), "x"),
-        ("Levered Free Cash Flow (bn)", _as_num(bn(info.get("leveredFreeCashflow"))), f"bn {cur}"),
-    ]
-
-    df = pd.DataFrame(rows, columns=["Metric", "Value", "Unit"])
-    return df
-
-# Multi-Ticker Parser
-def parse_tickers(s: str, max_n: int = 5) -> List[str]:
-    if not s:
-        return []
-    for sep in [";", "\n", "\t", " "]:
-        s = s.replace(sep, ",")
-    toks = [t.strip().upper() for t in s.split(",") if t.strip()]
-    return list(dict.fromkeys(toks))[:max_n]
+    return pd.DataFrame(rows, columns=["Metric", "Value", "Unit"])
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Rendering-Funktion für einen Ticker
 # ──────────────────────────────────────────────────────────────────────────────
-def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[str, float]]:
+def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[str, float], Dict[str, float]]:
     try:
         tkr = yf.Ticker(ticker)
         info: Dict = tkr.info or {}
@@ -298,7 +303,7 @@ def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[st
         dividend_yield = compute_dividend_yield(tkr, price, info)
         payout_ratio = normalize_percent_robust(safe_get(info, "payoutRatio", np.nan))
 
-        # Optionen-Metriken
+        # Optionen
         pcr_vol, pcr_oi, pcr_exp = compute_put_call_ratio(tkr)
         voi_total, voi_call, voi_put, voi_exp = compute_voi_ratios(tkr)
 
@@ -310,70 +315,58 @@ def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[st
         revenue      = get_income_value(fin, ["Total Revenue", "Revenue"])
         cost_rev     = get_income_value(fin, ["Cost Of Revenue", "Cost of Revenue", "Cost of revenue"])
         gross_profit = get_income_value(fin, ["Gross Profit", "Gross profit"])
-        op_ex        = get_income_value(fin, ["Total Operating Expenses", "Operating Expense", "Operating Expenses"])
         net_income   = get_income_value(fin, ["Net Income", "Net income", "Net Income Common Stockholders"])
-
         if pd.isna(gross_profit) and pd.notna(revenue) and pd.notna(cost_rev):
             gross_profit = revenue - cost_rev
 
-        # Header / Meta
+        # Header
         st.markdown("---")
-        meta_col1, meta_col2, meta_col3 = st.columns(3)
-        with meta_col1:
+        c1, c2, c3 = st.columns(3)
+        with c1:
             st.subheader(long_name)
             st.write("**Ticker:**", label_tkr)
             st.write("**Exchange:**", exch)
             st.write("**Country:**", country)
-            if website:
-                st.write("**Web:**", website)
-        with meta_col2:
+            if website: st.write("**Web:**", website)
+        with c2:
             st.write("**Industry:**", industry or "n/a")
             st.write("**Sector:**", sector or "n/a")
             st.write("**Employees:**", int(employees) if pd.notna(employees) else "n/a")
             st.write("**Shares Outstanding (bn):**", f"{bn(shares):.3f}" if pd.notna(shares) else "n/a")
-        with meta_col3:
+        with c3:
             st.write("**Market Cap (bn):**", f"{bn(mktcap):.2f} {currency}" if pd.notna(mktcap) else "n/a")
             st.write("**Current Price:**", f"{price:.3f} {currency}" if pd.notna(price) else "n/a")
             ed = safe_get(info, "earningsDate", [])
-            next_earnings = None
+            nxt = None
             if isinstance(ed, (list, tuple)) and ed:
-                try: next_earnings = pd.to_datetime(ed[0]).date().isoformat()
+                try: nxt = pd.to_datetime(ed[0]).date().isoformat()
                 except Exception: pass
-            st.write("**Next earnings:**", next_earnings or "n/a")
-
+            st.write("**Next earnings:**", nxt or "n/a")
         if safe_get(info, "longBusinessSummary", ""):
             st.caption(safe_get(info, "longBusinessSummary", ""))
 
         # KPI-Zeile
         st.markdown("---")
         k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
-
         pe_ok  = pd.notna(trailing_pe) and trailing_pe < 10
         pb_ok  = pd.notna(pb)          and pb < 1
         dy_ok  = pd.notna(dividend_yield) and dividend_yield > 0.05
-
         kpi(k1, "P/E RATIO", f"{trailing_pe:.2f}x" if pd.notna(trailing_pe) else "n/a", pe_ok)
         kpi(k2, "P/S (TTM)", f"{ps_ttm:.2f}" if pd.notna(ps_ttm) else "n/a", False)
         kpi(k3, "P/B", f"{pb:.2f}" if pd.notna(pb) else "n/a", pb_ok)
         kpi(k4, "DIVIDEND YIELD", "n/a" if pd.isna(dividend_yield) else f"{dividend_yield*100:.2f}%", dy_ok)
         kpi(k5, "PAYOUT RATIO", "n/a" if pd.isna(payout_ratio) else f"{payout_ratio*100:.2f}%", False)
-
-        pcr_str_parts = []
-        if pd.notna(pcr_vol): pcr_str_parts.append(f"vol {pcr_vol:.2f}")
-        if pd.notna(pcr_oi):  pcr_str_parts.append(f"OI {pcr_oi:.2f}")
-        pcr_str = " | ".join(pcr_str_parts) if pcr_str_parts else "n/a"
+        pcr_str = " | ".join([s for s in [f"vol {pcr_vol:.2f}" if pd.notna(pcr_vol) else None,
+                                          f"OI {pcr_oi:.2f}"  if pd.notna(pcr_oi)  else None] if s]) or "n/a"
         kpi(k6, "PUT/CALL RATIO", pcr_str, False)
-
         voi_ok = bool(pd.notna(voi_total) and voi_total > 1)
         kpi(k7, "VOI (VOL/OI)", "n/a" if pd.isna(voi_total) else f"{voi_total:.2f}", voi_ok)
-
         if (pcr_exp or voi_exp):
             st.caption(f"Optionen-Metriken auf nächster Fälligkeit: {voi_exp or pcr_exp}.")
 
         # Charts
         st.markdown("---")
         ch_left, ch_right = st.columns(2)
-
         with ch_left:
             st.caption("Price (Close)")
             try:
@@ -392,7 +385,6 @@ def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[st
                     st.info("No price history available.")
             except Exception as e:
                 st.warning(f"Could not load price data: {e}")
-
         with ch_right:
             st.caption("Earnings & Revenue (last period)")
             names = ["Revenue", "Cost of Revenue", "Gross Profit", "Earnings"]
@@ -400,11 +392,9 @@ def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[st
                 revenue - cost_rev if pd.notna(revenue) and pd.notna(cost_rev) else np.nan
             )
             vals_abs = [bn(revenue), bn(cost_rev), bn(gross_val), bn(net_income)]
-            colors = ["#1f77b4", "#b04a4a", "#2ca02c", "#17becf"]
-
             fig, ax = plt.subplots(figsize=(4.8, 2.0))
             x = np.arange(len(names))
-            bars = ax.bar(x, vals_abs, color=colors, width=0.8)
+            bars = ax.bar(x, vals_abs, width=0.8)
             ax.set_ylabel(f"{sym} bn ({currency})", fontsize=7)
             ax.set_title(f"{label_tkr} – {currency}", fontsize=7)
             ax.set_xticks(x)
@@ -416,11 +406,10 @@ def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[st
                             f"{sym}{v:.2f}b", ha="center", va="bottom", fontsize=6)
             st.pyplot(fig, clear_figure=True)
 
-        # Valuation & Profitability
+        # Valuation & Profitability (Anzeige)
         st.markdown("---")
         st.subheader("Valuation & Profitability")
         ev         = safe_get(info, "enterpriseValue", np.nan)
-        peg        = safe_get(info, "pegRatio", np.nan)
         ev_rev     = first_notna(safe_get(info, "enterpriseToRevenue", None),
                                  safe_get(info, "enterpriseToRev", None), np.nan)
         ev_ebitda  = safe_get(info, "enterpriseToEbitda", np.nan)
@@ -431,15 +420,11 @@ def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[st
         nic_ttm    = safe_get(info, "netIncomeToCommon", np.nan)
 
         GREEN = 'color: #16a34a; font-weight:700;'
-
         def style_val_rows(row):
             m = row["Metric"]
-            if m == "EV/EBITDA" and pd.notna(ev_ebitda) and ev_ebitda < 10:
-                return [GREEN, GREEN]
-            if m == "Profit Margin" and pd.notna(profit_m) and profit_m > 0.20:
-                return [GREEN, GREEN]
+            if m == "EV/EBITDA" and pd.notna(ev_ebitda) and ev_ebitda < 10: return [GREEN, GREEN]
+            if m == "Profit Margin" and pd.notna(profit_m) and profit_m > 0.20: return [GREEN, GREEN]
             return ["", ""]
-
         val_rows: List[Tuple[str, str]] = [
             ("Enterprise Value",            "n/a" if pd.isna(ev)          else f"{currency_symbol(currency)}{bn(ev):.2f}b ({currency})"),
             ("Trailing P/E",                "n/a" if pd.isna(trailing_pe) else f"{trailing_pe:.2f}×"),
@@ -454,84 +439,29 @@ def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[st
         val_df = pd.DataFrame(val_rows, columns=["Metric", "Value"])
         st.table(val_df.style.apply(style_val_rows, axis=1))
 
-        # Balance Sheet & Cash Flow
-        st.markdown("---")
-        st.subheader("Balance Sheet & Cash Flow")
-        total_cash = safe_get(info, "totalCash", np.nan)
-        d_to_e     = safe_get(info, "debtToEquity", np.nan)
-        lfcf       = safe_get(info, "leveredFreeCashflow", np.nan)
-
-        def style_bs_rows(row):
-            if row["Metric"] == "Total Debt/Equity (mrq)" and pd.notna(d_to_e):
-                val = float(d_to_e)
-                cond = (val < 50) if val > 1 else (val < 0.50)
-                if cond: return [GREEN, GREEN]
-            return ["", ""]
-
-        if pd.notna(d_to_e):
-            d_to_e_disp = f"{d_to_e:.1f}% (~{d_to_e/100:.2f}×)" if d_to_e > 5 else f"{d_to_e:.2f}×"
-        else:
-            d_to_e_disp = "n/a"
-
-        bs_rows: List[Tuple[str, str]] = [
-            ("Total Cash (mrq)",            "n/a" if pd.isna(total_cash) else f"{currency_symbol(currency)}{bn(total_cash):.2f}b ({currency})"),
-            ("Total Debt/Equity (mrq)",     d_to_e_disp),
-            ("Levered Free Cash Flow",      "n/a" if pd.isna(lfcf)       else f"{currency_symbol(currency)}{bn(lfcf):.2f}b ({currency})"),
-        ]
-        bs_df = pd.DataFrame(bs_rows, columns=["Metric", "Value"])
-        st.table(bs_df.style.apply(style_bs_rows, axis=1))
-
-        # Export
+        # Export Einzeltitel
         st.markdown("---")
         st.subheader("Export")
-
-        meta_dict = {
-            "currency": currency,
-            "label_tkr": label_tkr,
-            "long_name": long_name,
-            "exchange": exch,
-            "country": country,
-            "employees": employees,
-            "shares": shares,
-            "mktcap": mktcap,
-            "price": price,
-        }
-        computed = {
-            "dividend_yield": dividend_yield,
-            "payout_ratio": payout_ratio,
-            "pcr_vol": pcr_vol, "pcr_oi": pcr_oi, "pcr_exp": pcr_exp,
-            "voi_total": voi_total, "voi_call": voi_call, "voi_put": voi_put,
-        }
-
+        meta_dict = {"currency": currency, "label_tkr": label_tkr, "long_name": long_name,
+                     "exchange": exch, "country": country, "employees": employees,
+                     "shares": shares, "mktcap": mktcap, "price": price}
+        computed = {"dividend_yield": dividend_yield, "payout_ratio": payout_ratio,
+                    "pcr_vol": pcr_vol, "pcr_oi": pcr_oi, "pcr_exp": pcr_exp,
+                    "voi_total": voi_total, "voi_call": voi_call, "voi_put": voi_put}
         metrics_df = build_metrics_df(meta_dict, info, computed)
-
         col_us, col_eu = st.columns(2)
         with col_us:
             st.caption("CSV (US-Format: , & .)")
-            csv_us = metrics_df.to_csv(index=False)
-            st.download_button(
-                label="⬇️ CSV (US)",
-                data=csv_us.encode("utf-8"),
-                file_name=f"{label_tkr}_metrics.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
+            st.download_button("⬇️ CSV (US)", data=metrics_df.to_csv(index=False).encode("utf-8"),
+                               file_name=f"{label_tkr}_metrics.csv", mime="text/csv", use_container_width=True)
         with col_eu:
             st.caption("CSV (EU-Format: ; & ,)")
-            csv_eu = metrics_df.to_csv(index=False, sep=";", decimal=",", float_format="%.4f")
-            st.download_button(
-                label="⬇️ CSV (EU)",
-                data=csv_eu.encode("utf-8-sig"),
-                file_name=f"{label_tkr}_metrics_eu.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
+            st.download_button("⬇️ CSV (EU)", data=metrics_df.to_csv(index=False, sep=";", decimal=",", float_format="%.4f").encode("utf-8-sig"),
+                               file_name=f"{label_tkr}_metrics_eu.csv", mime="text/csv", use_container_width=True)
 
-        # Vergleichszeile zurückgeben
-        compare_row = {
-            "Ticker": label_tkr,
-            "Name": long_name,
-            "Währung": currency,
+        # Vergleichszeilen zurückgeben
+        core_row = {
+            "Ticker": label_tkr, "Name": long_name, "Währung": currency,
             "Preis": float(price) if pd.notna(price) else np.nan,
             "MktCap_bn": float(bn(mktcap)) if pd.notna(mktcap) else np.nan,
             "P/E": float(trailing_pe) if pd.notna(trailing_pe) else np.nan,
@@ -541,11 +471,23 @@ def render_ticker(ticker: str, years_window: int) -> Tuple[pd.DataFrame, Dict[st
             "PCR_oi": float(pcr_oi) if pd.notna(pcr_oi) else np.nan,
             "VOI_total": float(voi_total) if pd.notna(voi_total) else np.nan,
         }
-        return metrics_df, compare_row
+        val_row = {
+            "Ticker": label_tkr,
+            "EV_bn": float(bn(ev)) if pd.notna(ev) else np.nan,
+            "PE": float(trailing_pe) if pd.notna(trailing_pe) else np.nan,
+            "EV_Rev": float(ev_rev) if pd.notna(ev_rev) else np.nan,
+            "EV_EBITDA": float(ev_ebitda) if pd.notna(ev_ebitda) else np.nan,
+            "ProfitMargin_%": float(profit_m*100) if pd.notna(profit_m) else np.nan,
+            "ROA_%": float(roa*100) if pd.notna(roa) else np.nan,
+            "ROE_%": float(roe*100) if pd.notna(roe) else np.nan,
+            "Revenue_bn": float(bn(revenue_ttm)) if pd.notna(revenue_ttm) else np.nan,
+            "NetIncome_bn": float(bn(nic_ttm)) if pd.notna(nic_ttm) else np.nan,
+        }
+        return metrics_df, core_row, val_row
 
     except Exception as e:
         st.error(f"Could not load data for '{ticker}': {e}")
-        return pd.DataFrame(), {}
+        return pd.DataFrame(), {}, {}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Session defaults
@@ -587,33 +529,64 @@ with left:
 
 with right:
     st.header("Parameters")
-    st.text_input("Ticker(s) – bis zu 5, getrennt durch , ; Leerzeichen oder Zeilen",
+    st.text_input("Ticker(s) – bis zu 10, getrennt durch , ; Leerzeichen oder Zeilen",
                   key="tickers_raw", value=st.session_state.tickers_raw)
+    upload = st.file_uploader("CSV mit Tickern (Spalte: ticker/symbol/code oder erste Spalte)", type=["csv"])
     years_window = st.slider("Price window (years)", 1, 10, 3, 1)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Core – Multi-Ticker Rendering
 # ──────────────────────────────────────────────────────────────────────────────
-tickers = parse_tickers(st.session_state.get("tickers_raw", ""), max_n=5)
+tickers_text = parse_tickers(st.session_state.get("tickers_raw", ""), max_n=10)
+tickers_csv  = parse_csv_tickers(upload, max_n=10) if upload else []
+tickers = list(dict.fromkeys([*tickers_text, *tickers_csv]))[:10]
 
 if not tickers:
-    st.info("Bitte mindestens einen Ticker eingeben.")
+    st.info("Mindestens einen Ticker eingeben oder CSV hochladen.")
     st.stop()
 
 tabs = st.tabs(tickers)
-compare_rows: List[Dict[str, float]] = []
+core_rows: List[Dict[str, float]] = []
+val_rows_all: List[Dict[str, float]] = []
 
 for tab, t in zip(tabs, tickers):
     with tab:
         st.markdown(f"---\n### {t}")
-        df_metrics, row = render_ticker(t, years_window)
-        if row:
-            compare_rows.append(row)
+        _, core_row, val_row = render_ticker(t, years_window)
+        if core_row: core_rows.append(core_row)
+        if val_row:  val_rows_all.append(val_row)
 
+# Vergleiche
 st.markdown("---")
 st.subheader("Vergleich – Kerndaten")
-if compare_rows:
-    comp = pd.DataFrame(compare_rows)
-    st.dataframe(comp.set_index("Ticker"), use_container_width=True)
+if core_rows:
+    comp_core = pd.DataFrame(core_rows).set_index("Ticker")
+    st.dataframe(comp_core, use_container_width=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button("⬇️ Vergleich Kerndaten (US CSV)",
+                           data=comp_core.reset_index().to_csv(index=False).encode("utf-8"),
+                           file_name="compare_core.csv", mime="text/csv", use_container_width=True)
+    with c2:
+        st.download_button("⬇️ Vergleich Kerndaten (EU CSV)",
+                           data=comp_core.reset_index().to_csv(index=False, sep=";", decimal=",", float_format="%.4f").encode("utf-8-sig"),
+                           file_name="compare_core_eu.csv", mime="text/csv", use_container_width=True)
 else:
-    st.info("Keine vergleichbaren Daten verfügbar.")
+    st.info("Keine Kerndaten verfügbar.")
+
+st.markdown("---")
+st.subheader("Vergleich – Valuation & Profitability")
+if val_rows_all:
+    comp_val = pd.DataFrame(val_rows_all).set_index("Ticker")
+    st.dataframe(comp_val, use_container_width=True)
+    c3, c4 = st.columns(2)
+    with c3:
+        st.download_button("⬇️ Vergleich Valuation (US CSV)",
+                           data=comp_val.reset_index().to_csv(index=False).encode("utf-8"),
+                           file_name="compare_valuation.csv", mime="text/csv", use_container_width=True)
+    with c4:
+        st.download_button("⬇️ Vergleich Valuation (EU CSV)",
+                           data=comp_val.reset_index().to_csv(index=False, sep=";", decimal=",", float_format="%.4f").encode("utf-8-sig"),
+                           file_name="compare_valuation_eu.csv", mime="text/csv", use_container_width=True)
+else:
+    st.info("Keine Valuation-Daten verfügbar.")
